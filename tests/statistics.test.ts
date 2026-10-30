@@ -31,6 +31,7 @@ test('Counter orientation follows selected-champion rate when raw win field is a
 test('Duos are observed directly; trios and full compositions remain unavailable',()=>{
  const s=sample();s.synergies[pairKey('ADC:C3','SUPPORT:C4')]=publishedStat({play:1000,win:560});const e=new Engine(s);
  assert.equal(e.group([null,null,null,'C3','C4']).wr,56);assert.equal(e.group(['C0',null,null,'C3','C4']).wr,null);assert.equal(e.collective(draft.blue,draft.red).against.n,null);
+ assert.equal(e.collective(['C0',null,null,'C3','C4'],draft.red).duos[0].stat.wr,56);
 });
 test('One to five optimization slots retain three valid suggestions with bans and opposite picks',()=>{
  const e=new Engine(sample());for(let n=1;n<=5;n++){const d=structuredClone(draft);d.blue=Array(5).fill(null);d.selected.blue=Array.from({length:n},(_,i)=>i);d.bans=['C19'];const recommendations=e.recommend(d,'blue');assert.equal(recommendations.length,3);for(const r of recommendations){const ids=Object.values(r.parts);assert.equal(ids.length,n);assert.equal(new Set(ids).size,n);assert.ok(ids.every(c=>!d.red.includes(c)&&!d.bans.includes(c!)));assert.equal(r.collective.probability,null);}}
