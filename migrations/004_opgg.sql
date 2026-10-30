@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS drafting.player_accounts (
 );
 INSERT INTO drafting.player_accounts(id,user_id,game_name,tag_line,platform,created_at)
 SELECT id,user_id,game_name,tag_line,platform,created_at FROM drafting.riot_accounts ON CONFLICT DO NOTHING;
--- Retire the former queue; no new code executes these jobs or trains the raw-match models.
+-- Retire the former queue. No new code executes these jobs or trains the raw-match models.
 UPDATE drafting.jobs SET status='retired',updated_at=now() WHERE status<>'retired';
 UPDATE drafting.models SET active=false WHERE active=true;
 ALTER TABLE drafting.player_accounts ENABLE ROW LEVEL SECURITY;
