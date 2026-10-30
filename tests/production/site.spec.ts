@@ -9,6 +9,11 @@ test('Published assets, live API, draft and protected profile',async({page,reque
   await expect(page.locator('#auto-status')).toContainText('À jour',{timeout:30000});
   expect(await page.locator('.champ-thumb img').first().evaluate((img:HTMLImageElement)=>img.complete&&img.naturalWidth>0)).toBeTruthy();
   await page.getByRole('button',{name:'Statistiques de Darius'}).click();await expect(page.locator('#champ-dialog-body')).toContainText('Riot Match-V5');await page.locator('#close-champ').click();
+  await page.locator('[data-apply-side="blue"]').first().click();
+  await expect(page.getByRole('combobox',{name:'Alliés TOP, champion'})).toHaveValue('Darius');
+  for(const role of ['JUNGLE','MID','ADC','SUPPORT'])await expect(page.getByRole('combobox',{name:`Alliés ${role}, champion`})).not.toHaveValue('');
+  await expect(page.locator('#auto-status')).toContainText('À jour',{timeout:30000});
+  await expect(page.locator('#applied-overview')).toContainText('5 champion(s)');
   await page.locator('#account-btn').click();await expect(page.locator('#google-login')).toBeVisible();await page.locator('#close-account').click();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy();
   await page.screenshot({path:`test-results/published-${test.info().project.name}.png`,fullPage:true});
