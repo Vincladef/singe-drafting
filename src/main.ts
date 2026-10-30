@@ -12,6 +12,7 @@ const esc=(s:unknown)=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 const norm=(s:string)=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/gi,'').toLowerCase();
 let champions:Champion[]=fallback,mode='manual',analysis:any=null;
 let auth:ReturnType<typeof makeAuth>|null=null,user:{id:string;name:string}|null=null,accounts:any[]=[];
+let authReady:Promise<void>;
 let globalOn=true,personalOn=false,shown=['wr','vs','gd15'];
 let draft:Draft={blue:Array(5).fill(null),red:Array(5).fill(null),selected:{blue:[0,1,2,3,4],red:[0,1,2,3,4]},bans:[],players:[],filter:{patch:'all',platform:'all',queue:420,days:30,tier:'all'}};
 let sequence=0,timer:ReturnType<typeof setTimeout>,controller:AbortController|null=null,preferenceTimer:ReturnType<typeof setTimeout>;
@@ -162,7 +163,7 @@ async function loadProfile(){const profile=await api('profile',{},true);accounts
 async function showAccount(){
   $<HTMLDialogElement>('account-dialog').showModal();
   if(!user){$('account-content').innerHTML='<p class="inline-note">Connecte-toi pour conserver tes comptes Riot, tes préférences et tes drafts.</p><button id="google-login" class="mainbtn">Continuer avec Google</button><p class="inline-note">La connexion Google est gérée par Neon Auth. L’association d’un Riot ID reste une déclaration, distincte d’une autorisation Riot Sign On.</p>';
-    $('google-login').onclick=async()=>{try{if(!auth)throw new Error('Authentification indisponible.');const result=await auth.signIn.social({provider:'google',callbackURL:location.origin});if(result.error)throw new Error(result.error.message||'Connexion indisponible.');}catch(e){toast((e as Error).message);}};return;
+    $('google-login').onclick=async()=>{const button=$<HTMLButtonElement>('google-login');button.disabled=true;button.textContent='Connexion à Google…';try{await authReady;if(user){await showAccountRefresh();return;}if(!auth)throw new Error('Authentification indisponible. Réessaie dans un instant.');const result=await auth.signIn.social({provider:'google',callbackURL:location.origin});if(result.error)throw new Error(result.error.message||'Connexion indisponible.');}catch(e){toast((e as Error).message);button.disabled=false;button.textContent='Continuer avec Google';}};return;
   }
   $('account-content').innerHTML='<p class="inline-note">Chargement de ton espace…</p>';
   try{
@@ -207,13 +208,17 @@ $('fill-example').onclick=()=>{draft.blue=['Darius','Fiddlesticks','Ahri',null,n
 $('stat-global').onchange=()=>{globalOn=$<HTMLInputElement>('stat-global').checked;updateStats();savePreferences();};$('stat-mine').onchange=()=>{personalOn=$<HTMLInputElement>('stat-mine').checked;updateStats();savePreferences();};
 $('config-btn').onclick=()=>{const p=$('config-panel');p.hidden=!p.hidden;$('config-btn').setAttribute('aria-expanded',String(!p.hidden));};
 async function init(){
+  authReady=initializeAuth();
   try{const saved=JSON.parse(localStorage.getItem('singe:draft:v1')||'null');if(saved?.blue?.length===5&&saved?.red?.length===5&&saved.filter&&saved.selected){draft={...saved,players:[]};}}catch{}
   syncFilters();renderRows();renderBans();renderMetricOptions();
   const cat=await fetch('/data/catalog.json').then(r=>r.ok?r.json():null).catch(()=>null);if(cat?.champions){champions=cat.champions;$('champion-list').innerHTML=champions.map(c=>`<option value="${esc(c.name)}">`).join('');renderRows();}
-  try{const config=await api('config');if(config.authUrl){auth=makeAuth(config.authUrl);const session=await auth.getSession();if(session.error)throw new Error(session.error.message||'Session indisponible.');if(session.data?.user){user=session.data.user as {id:string;name:string};$('account-btn').textContent=user.name||'Mon espace';await loadProfile();}}}catch{ /* Anonymous drafting remains available. */ }
+  await authReady;
   try{const metadata=await api('metadata');for(const p of metadata.patches){if(!Array.from($<HTMLSelectElement>('filter-patch').options).some(o=>o.value===p.patch))$<HTMLSelectElement>('filter-patch').add(new Option(`${p.patch} · ${p.games} matchs`,p.patch));}}catch{}
   if(location.search.includes('error='))toast('La connexion Google n’a pas abouti. Réessaie depuis ton espace.');
   schedule();
+}
+async function initializeAuth(){
+  try{const config=await api('config');if(config.authUrl){auth=makeAuth(config.authUrl);const session=await auth.getSession();if(session.error)throw new Error(session.error.message||'Session indisponible.');if(session.data?.user){user=session.data.user as {id:string;name:string};$('account-btn').textContent=user.name||'Mon espace';await loadProfile();}}}catch{ /* Anonymous drafting remains available. */ }
 }
 void init();
 setInterval(()=>{if(!document.hidden&&$('page-draft').classList.contains('on')&&!openPick)schedule();},180000);
