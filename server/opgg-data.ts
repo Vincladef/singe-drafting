@@ -22,6 +22,8 @@ export function publishedStat(raw:any):Stat{
 }
 export function mergeAnalysis(snapshot:OpggSnapshot,champion:Champion,requestedRole:Role,payload:any){
   const data=payload.data;if(!data?.summary)throw new Error('OPGG_MISSING_SUMMARY');
+  if(payload.position&&role(payload.position)!==requestedRole)throw new Error('OPGG_POSITION_MISMATCH');
+  if(snapshot.context.patch&&data.trends?.win?.version&&String(data.trends.win.version)!==snapshot.context.patch)throw new Error('OPGG_PATCH_MISMATCH');
   if(data.summary.average_stats)snapshot.stats[champion.id]=publishedStat(data.summary.average_stats);
   for(const p of data.summary.positions||[]){const r=role(p.name);if(!r)continue;
     snapshot.stats[token(r,champion.id)]=publishedStat(p.stats);

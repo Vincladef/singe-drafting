@@ -54,3 +54,6 @@ test('Documented matchup can overturn higher individual WR and score trace recon
  assert.ok(b.score>a.score);assert.ok(Math.abs(b.components.reduce((v,x)=>v+x.contribution,0)-b.score)<1e-12);assert.equal(b.components.find(x=>x.kind==='duel').stat.n,10000);
  assert.ok(e.score(['C2','C3',null,null,null],draft.red,{},true).missing.some(x=>x.kind==='duo'));
 });
+test('Role fallback and patch mismatch cannot contaminate an All Tiers snapshot',()=>{
+ const s=sample();s.context.patch='16.21';assert.throws(()=>mergeAnalysis(s,catalog[0],'TOP',{position:'support',data:{summary:{}}}),/POSITION_MISMATCH/);assert.throws(()=>mergeAnalysis(s,catalog[0],'TOP',{position:'top',data:{summary:{},trends:{win:{version:'16.22'}}}}),/PATCH_MISMATCH/);
+});
