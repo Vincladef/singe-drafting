@@ -1,6 +1,7 @@
 import { db, cached, cache, hash, status } from './db.ts';
 import { riot, routing, RiotError } from './riot.ts';
 import type { Champion, Game, Participant, Role } from './types.ts';
+import { catalogSnapshot } from './catalog.ts';
 const roleMap:Record<string,Role>={TOP:'TOP',JUNGLE:'JUNGLE',MIDDLE:'MID',BOTTOM:'ADC',UTILITY:'SUPPORT'};
 export function frameAt(frames:any[]|undefined,minute:number){
   const target=minute*60000;
@@ -64,7 +65,7 @@ export async function refreshAccount(account:any){
   if(solo)await db()`update drafting.participants set rank_tier=${solo.tier},rank_observed_at=now() where player_hash=${hash(account.puuid)}`;
 }
 export async function collect(limit=4,eager=false){
-  const sql=db();const catalog=(await cached<{champions:Champion[]}>('catalog'))?.champions;
+  const sql=db();const catalog=(await catalogSnapshot()).champions;
   if(!catalog?.length)return {imported:0,reason:'catalog_unavailable'};
   const missing=await sql`select id,platform from drafting.matches where timeline_status='pending' order by imported_at limit ${Math.min(limit,5)}`;
   if(missing.length){

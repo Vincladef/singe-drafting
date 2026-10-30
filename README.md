@@ -46,7 +46,7 @@ La vraie photographie CC BY 2.0 et les portraits officiels sont téléchargés d
 
 `migrations/001_initial.sql` contient profils, comptes, champions, patchs, matchs, participants, timelines, drafts, jobs, caches d’agrégats, quotas, provenance, modèles et prédictions. Les agrégats sont dérivés des matchs normalisés et mis en cache ; il n’existe pas de tables dupliquées pour chaque combinaison possible.
 
-La tâche `refresh` collecte progressivement toutes les cinq minutes avec verrous de jobs, budgets partagés et respect de Retry-After. Les horaires Netlify sont en UTC.
+La tâche `refresh` collecte progressivement toutes les cinq minutes avec verrous de jobs, budgets partagés et respect de Retry-After. Après publication, `bootstrap` complète le corpus récent jusqu’à 180 matchs, avec une durée maximale de huit minutes et les mêmes quotas. Les horaires Netlify sont en UTC. La migration `002` conserve l’horodatage effectif des frames et accepte un écart de cinq secondes autour des minutes cibles.
 
 ## Données et limites
 

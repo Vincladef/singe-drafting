@@ -139,7 +139,7 @@ export class Engine {
       context:{...draft.filter,source:'Riot Match-V5 + Timeline',games:this.games.length,
         oldest:this.games.length?new Date(Math.min(...this.games.map(g=>g.started))).toISOString():null,
         newest:this.games.length?new Date(Math.max(...this.games.map(g=>g.started))).toISOString():null,
-        sampleLimit:5000,sampling:'Échantillon de comptes déclarés et de pages du classement ; biais de sélection. Aucun rang historique fourni par Riot.',
+        sampleLimit:5000,computedAt:new Date().toISOString(),snapshotMaxAgeSeconds:180,sampling:'Échantillon de comptes déclarés et de pages du classement ; biais de sélection. Aucun rang historique fourni par Riot.',
         rankDefinition:'Un filtre de rang conserve seulement les matchs dont les dix participants ont ce rang observé ; ce rang est actuel, pas historique.'},
       probability:null,modelStatus:'unvalidated'};
   }

@@ -4,7 +4,8 @@ import { Engine } from './engine.ts';
 import type { Champion, Draft } from './types.ts';
 import { HttpError } from './auth.ts';
 import { predict,type ModelArtifact } from './model.ts';
-export async function catalog(){return (await cached<{version:string;champions:Champion[]}>('catalog'))||{version:'',champions:[]};}
+import { catalogSnapshot } from './catalog.ts';
+export const catalog=catalogSnapshot;
 export async function analyze(draft:Draft,user:string|null){
   const cat=await catalog();
   const ids=new Set(cat.champions.map(c=>c.id));

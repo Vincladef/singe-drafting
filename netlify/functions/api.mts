@@ -58,7 +58,10 @@ export default async (req:Request,context:Context)=>{
     if(path.match(/^accounts\/[\w-]+$/)){
       const id=uuid.parse(path.split('/')[1]);const accounts=await db()`select * from drafting.riot_accounts where id=${id} and user_id=${user}`;
       if(!accounts[0])throw new HttpError(404,'Compte introuvable.');
-      if(req.method==='DELETE'){await db()`delete from drafting.riot_accounts where id=${id} and user_id=${user}`;return json({ok:true});}
+      if(req.method==='DELETE'){
+        await db()`delete from drafting.jobs where payload->>'accountId'=${id}`;
+        await db()`delete from drafting.riot_accounts where id=${id} and user_id=${user}`;return json({ok:true});
+      }
       if(req.method==='POST'){
         if(!await quota(`refresh:${hash(user)}`,6))throw new HttpError(429,'Actualisation déjà demandée récemment.');
         await enqueue(accounts[0].puuid,accounts[0].platform,id);return json({ok:true,status:'pending'},202);

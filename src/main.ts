@@ -216,3 +216,4 @@ async function init(){
   schedule();
 }
 void init();
+setInterval(()=>{if(!document.hidden&&$('page-draft').classList.contains('on')&&!openPick)schedule();},180000);
