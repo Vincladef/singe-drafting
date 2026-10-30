@@ -2,6 +2,7 @@ import { db, cached, cache, hash, status } from './db.ts';
 import { riot, routing, RiotError } from './riot.ts';
 import type { Champion, Game, Participant, Role } from './types.ts';
 import { catalogSnapshot } from './catalog.ts';
+import { randomInt } from 'node:crypto';
 const roleMap:Record<string,Role>={TOP:'TOP',JUNGLE:'JUNGLE',MIDDLE:'MID',BOTTOM:'ADC',UTILITY:'SUPPORT'};
 export function frameAt(frames:any[]|undefined,minute:number){
   const target=minute*60000;
@@ -78,20 +79,21 @@ export async function collect(limit=4,eager=false){
   let imported=0;
   try{
     if(!job){
-      // Rotate regions and ladder tiers. This is a convenience sample, never a census.
-      const tick=Math.floor(Date.now()/300000),platform=['EUW1','EUW1','NA1','KR'][tick%4];
-      const tier=['GOLD','PLATINUM','EMERALD','DIAMOND'][Math.floor(tick/4)%4];
-      const entries=await riot(platform.toLowerCase(),`/lol/league/v4/entries/RANKED_SOLO_5x5/${tier}/I?page=${1+(Math.floor(tick/16)%8)}`,3600);
-      const count=await sql`select count(*)::int as n from drafting.jobs where kind='cohort'`;
-      const entry=entries[(tick+count[0].n)%Math.max(1,entries.length)];if(!entry?.puuid)return {imported:0,reason:'no_seed_puuid'};
+      // Breadth first: small histories from many players across region/rank/division strata.
+      // The strata are not population-weighted, so this still must not be called a world census.
+      const platforms=['EUW1','EUN1','NA1','KR','BR1'],tiers=['IRON','BRONZE','SILVER','GOLD','PLATINUM','EMERALD','DIAMOND'];
+      const platform=platforms[randomInt(platforms.length)],tier=tiers[randomInt(tiers.length)],division=['I','II','III','IV'][randomInt(4)],page=randomInt(1,5);
+      const entries=await riot(platform.toLowerCase(),`/lol/league/v4/entries/RANKED_SOLO_5x5/${tier}/${division}?page=${page}`,3600);
+      const entry=entries[randomInt(Math.max(1,entries.length))];if(!entry?.puuid)return {imported:0,reason:'no_seed_puuid'};
       const jobKey=`cohort:${hash(entry.puuid+platform)}`;
-      const inserted=await sql`insert into drafting.jobs(key,kind,payload,status,lease_until) values(${jobKey},'cohort',${JSON.stringify({puuid:entry.puuid,platform})}::jsonb,'running',now()+interval '3 minutes') on conflict do nothing returning *`;
+      const inserted=await sql`insert into drafting.jobs(key,kind,payload,status,lease_until) values(${jobKey},'cohort',${JSON.stringify({puuid:entry.puuid,platform,tier,division,page})}::jsonb,'running',now()+interval '3 minutes') on conflict do nothing returning *`;
       if(!inserted[0])return {imported:0,reason:'cohort_already_sampled'};job=inserted[0];
     }
     const {puuid,platform,accountId}=job.payload;
     const lookback=job.kind==='cohort'?30:90;
     const startTime=Math.floor((Date.now()-lookback*86400000)/1000);
-    const ids=await riot<string[]>(routing(platform),`/lol/match/v5/matches/by-puuid/${encodeURIComponent(puuid)}/ids?start=0&count=100&type=ranked&startTime=${startTime}`,300);
+    const count=job.kind==='cohort'?5:100;
+    const ids=await riot<string[]>(routing(platform),`/lol/match/v5/matches/by-puuid/${encodeURIComponent(puuid)}/ids?start=0&count=${count}&type=ranked&startTime=${startTime}`,300);
     for(const id of ids.slice(job.cursor,job.cursor+limit)){if(await importMatch(id,platform,catalog))imported++;}
     const cursor=job.cursor+limit,done=cursor>=ids.length;
     await sql`update drafting.jobs set status=${done?'complete':'pending'},cursor=${cursor},lease_until=null,available_at=now()+interval '5 minutes',updated_at=now(),last_error=null where key=${job.key}`;

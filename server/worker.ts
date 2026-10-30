@@ -20,6 +20,7 @@ export async function runCollector(maxMs=45000){
   try{
     await withBackgroundBudget(async()=>{while(Date.now()-started<maxMs){
       const result=await collect(3,true);imported+=result.imported;repaired+=result.repaired||0;
+      if(result.reason&&['no_seed_puuid','cohort_already_sampled'].includes(result.reason))continue;
       if(result.reason){reason=result.reason;break;}
     }});
     return {imported,repaired,reason};
