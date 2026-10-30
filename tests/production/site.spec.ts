@@ -10,6 +10,7 @@ test('Published assets, live API, draft and protected profile',async({page,reque
   expect(await page.locator('.champ-thumb img').first().evaluate((img:HTMLImageElement)=>img.complete&&img.naturalWidth>0)).toBeTruthy();
   await page.getByRole('button',{name:'Statistiques de Darius'}).click();await expect(page.locator('#champ-dialog-body')).toContainText('OP.GG MCP');await page.locator('#close-champ').click();
   if(await page.locator('[data-apply-side="blue"]').count()){
+    await page.locator('.recommendation-evidence summary').first().click();await expect(page.locator('.recommendation-evidence').first()).toContainText('contribution');
     await page.locator('[data-apply-side="blue"]').first().click();
     await expect(page.getByRole('combobox',{name:'Alliés TOP, champion'})).toHaveValue('Darius');
     for(const role of ['JUNGLE','MID','ADC','SUPPORT'])await expect(page.getByRole('combobox',{name:`Alliés ${role}, champion`})).not.toHaveValue('');
@@ -47,4 +48,7 @@ test('Public OP.GG profile loads without Google and appears in the recent-name d
  const input=page.getByRole('combobox',{name:'Alliés ADC, champion'});await input.fill('KogMaw');await input.press('Enter');await expect(page.locator('#auto-status')).toContainText('À jour',{timeout:30000});
  await expect(page.locator('.pick.blue[data-slot="3"] .src-label.mine')).toBeVisible();
  await page.locator('#stat-mine').uncheck();await page.locator('#stat-mine').check();await page.locator('#setup-riot-id').fill('Fak');await expect(page.locator('.player-results [role=option]')).toHaveCount(1);await page.locator('.player-results [role=option]').click();await expect(page.locator('#identity-dialog')).not.toBeVisible();
+});
+test('Fiddlesticks versus Amumu is available as a separately scoped observation',async({request})=>{
+ test.setTimeout(60000);const response=await request.get('/api/matchup-detail?champion=Fiddlesticks&opponent=Amumu&role=JUNGLE');expect(response.status()).toBe(200);const data=await response.json();expect(data.stat.n).toBeGreaterThan(0);expect(data.compatibleWithAllTiers).toBe(false);expect(data.usedInRanking).toBe(false);expect(data.source).toContain('lol_get_lane_matchup_guide');
 });
