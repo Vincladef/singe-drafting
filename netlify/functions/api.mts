@@ -31,7 +31,7 @@ export default async (req:Request,context:Context)=>{
     }
     if(path==='live'&&req.method==='POST')return json({status:'unsupported',source:'OP.GG MCP',message:'Le MCP officiel OP.GG ne fournit pas la partie en cours ni la sélection des champions. Utilise la saisie rapide pendant ta draft.'});
     if(path==='coverage'&&req.method==='GET'){
-      const data=await snapshot('ranked');
+      const data=await snapshot(new URL(req.url).searchParams.get('queue')==='440'?'flex':'ranked');
       return json({source:'OP.GG MCP',context:data.context,completed:data.completed.length,total:data.champions.length,matchups:Object.keys(data.matchups).length,synergies:Object.keys(data.synergies).length,stale:Date.now()-Date.parse(data.context.fetchedAt)>21600000});
     }
     const user=(await userId(req))!;

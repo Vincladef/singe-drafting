@@ -53,7 +53,7 @@ function statBlock(side:Side,slot:number){
   if(!draft[side][slot]||(!globalOn&&!personalOn))return '';
   const card=analysis?.cards?.[side]?.[slot];
   const associated=draft.players?.some(p=>p.side===side&&p.slot===slot);
-  const sources=[...(globalOn?[{s:card?.role,title:'OP.GG · ALL TIERS',personal:false}]:[]),...(personalOn&&associated?[{s:card?.personal.champion,title:'JOUEUR ASSOCIÉ',personal:true}]:[])];
+  const sources=[...(globalOn?[{s:card?.role,title:'OP.GG · ALL TIERS',personal:false}]:[]),...(personalOn&&associated?[{s:card?.personal.champion,title:'JOUEUR · TOUS POSTES',personal:true}]:[])];
   return `<div class="two-src">${sources.map(({s,title,personal})=>`<div class="line-src"><div class="line-heading"><span class="src-label ${personal?'mine':''}">${title}</span><span class="src-n">${s?.n==null?'Volume non fourni':format(s.n,0)+' matchs'}</span></div><div class="metrics">${shown.map(k=>{
     const st=k==='vs'?(personal?card?.personal.matchup:card?.matchup):s;
     const insufficient=!personal&&st?.n!=null&&st.n<30;
@@ -155,7 +155,7 @@ function syncFilters(){
  $<HTMLSelectElement>('filter-queue').value=String(draft.filter.queue);
  $('filter-summary').textContent='All Tiers · région non précisée · patch courant OP.GG';
 }
-$<HTMLSelectElement>('filter-queue').onchange=()=>{draft.filter.queue=Number($<HTMLSelectElement>('filter-queue').value);syncFilters();changed();savePreferences();};
+$<HTMLSelectElement>('filter-queue').onchange=()=>{draft.filter.queue=Number($<HTMLSelectElement>('filter-queue').value);syncFilters();changed();savePreferences();void updateCoverage();};
 function renderBans(){$('ban-chips').innerHTML=draft.bans.map(id=>`<button class="ban-chip" data-ban="${id}">${esc(name(id))} ×</button>`).join('');}
 $('add-ban').onclick=()=>{const input=$<HTMLInputElement>('ban-input'),c=champions.find(c=>norm(c.name)===norm(input.value)||norm(c.id)===norm(input.value));if(!c){toast('Choisis un champion du catalogue.');return;}if(draft.bans.length>=10||[...draft.blue,...draft.red,...draft.bans].includes(c.id)){toast('Champion déjà choisi ou dix bans atteints.');return;}draft.bans.push(c.id);input.value='';renderBans();changed();};
 $('ban-chips').onclick=e=>{const b=(e.target as HTMLElement).closest<HTMLElement>('[data-ban]');if(b){draft.bans=draft.bans.filter(c=>c!==b.dataset.ban);renderBans();changed();}};
@@ -199,7 +199,7 @@ function associateMe(){
   if(myAccountId)draft.players.push({side:'blue',slot:myRole,accountId:myAccountId});
 }
 async function updateCoverage(){
- try{const c=await api('coverage');$('coverage-banner').innerHTML=`<a href="https://op.gg/lol/champions" target="_blank" rel="noopener">Statistiques OP.GG</a> · All Tiers · ${Number(c.completed)||0}/${Number(c.total)||0} champions · ${Number(c.matchups)||0} matchups · ${Number(c.synergies)||0} duos. Couverture mondiale non vérifiable : le MCP ne précise pas les régions.${c.stale?' Derniers agrégats conservés en attendant OP.GG.':''}`;}catch{$('coverage-banner').textContent='OP.GG indisponible. Aucun chiffre fictif ni ancien agrégat Riot utilisé.';}
+ try{const c=await api('coverage?queue='+draft.filter.queue);$('coverage-banner').innerHTML=`<a href="https://op.gg/lol/champions" target="_blank" rel="noopener">Statistiques OP.GG</a> · All Tiers · ${c.context?.mode==='flex'?'Flex':'Solo / Duo'} · ${Number(c.completed)||0}/${Number(c.total)||0} champions · ${Number(c.matchups)||0} matchups · ${Number(c.synergies)||0} duos. Couverture mondiale non vérifiable : le MCP ne précise pas les régions.${c.stale?' Derniers agrégats conservés en attendant OP.GG.':''}`;}catch{$('coverage-banner').textContent='OP.GG indisponible. Aucun chiffre fictif ni ancien agrégat Riot utilisé.';}
 }
 function showLiveLimit(){
  $('identity-title').textContent='Draft en direct';$('identity-content').innerHTML='<p class="inline-note">Le MCP officiel OP.GG ne fournit ni la partie en cours ni la sélection des champions du client. La synchronisation automatique est indisponible avec cette source.</p><p class="inline-note">Saisis rapidement les champions pendant la draft. La recherche au clavier et les recommandations automatiques restent disponibles.</p><button class="mainbtn" id="live-manual">Saisir les champions</button>';$<HTMLDialogElement>('identity-dialog').showModal();$('live-manual').onclick=()=>{$<HTMLDialogElement>('identity-dialog').close();document.querySelector<HTMLInputElement>('[data-combo]')?.focus();};
