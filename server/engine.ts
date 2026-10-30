@@ -17,7 +17,7 @@ export class Engine{
   personal(player:string|undefined,c:string,_r:number,_enemy?:string|null){const p=player?this.profiles[player]:null;return {champion:p?.champions.find(x=>x.champion===c)?.stat||missing(),overall:p?.overall||missing(),matchup:missing(),context:p?.context||null};}
   score(team:(string|null)[],enemy:(string|null)[],players:Record<number,string>={},trace=false){
     let score=0,evidence=0;const components:any[]=[],missing:any[]=[],present=team.flatMap((c,i)=>c?[{c,i}]:[]);
-    const add=(kind:string,champions:string[],stat:Stat,baseline:number,weight:number,value:number)=>{score+=value;if(trace)components.push({kind,champions,stat,baseline,weight,contribution:value,source:'OP.GG MCP · All Tiers'});};
+    const add=(kind:string,champions:string[],stat:Stat,baseline:number,weight:number,value:number)=>{score+=value;if(trace)components.push({kind,champions,stat,baseline,weight,contribution:value,source:kind==='personnel'?'OP.GG profil · saison, tous postes':'OP.GG MCP · All Tiers'});};
     for(const {c,i}of present){const s=this.stat(c,i),base=strength(s);evidence+=s.n||0;add('champion',[c],s,.5,.4,.4*logit(base));
       if(players[i]){const p=this.personal(players[i],c,i).champion;if(p.n)add('personnel',[c],p,base,.4,.4*(logit(strength(p,base,25))-logit(base)));else if(trace)missing.push({kind:'personnel',champions:[c],reason:'Profil ou champion non fourni'});}
       if(enemy[i]){const duel=this.matchup(c,i,enemy[i]!),opponent=strength(this.stat(enemy[i]!,i)),expected=1/(1+Math.exp(-(logit(base)-logit(opponent))));
@@ -36,7 +36,10 @@ export class Engine{
     const slots=d.selected[side].filter(i=>!d[side][i]).sort(),enemy=d[side==='blue'?'red':'blue'];if(!slots.length)return [];
     let beam=[{team:d[side].slice(),score:0,evidence:0}];
     for(const slot of slots){
-      const pool=this.catalog.filter(c=>(this.stat(c.id,slot).n||0)>=30&&this.stat(c.id,slot).wr!==null).map(c=>{const t=d[side].slice();t[slot]=c.id;return {c,score:this.score(t,enemy,players).score};}).sort((a,b)=>b.score-a.score).slice(0,24);
+      const ranked=this.catalog.filter(c=>(this.stat(c.id,slot).n||0)>=30&&this.stat(c.id,slot).wr!==null).map(c=>{const t=d[side].slice();t[slot]=c.id;const score=this.score(t,enemy,players).score;let lift=0;
+        for(const [key,p]of Object.entries(this.snapshot.synergies)){const parts=key.split('|'),own=token(ROLES[slot],c.id);if(!parts.includes(own)||(p.n||0)<20)continue;const other=parts.find(x=>x!==own)!,[r,id]=other.split(':'),j=ROLES.indexOf(r as any);if(!slots.includes(j)||j===slot||[...d.blue,...d.red,...d.bans].includes(id)||(this.stat(id,j).n||0)<30)continue;const baseline=(logit(strength(this.stat(c.id,slot)))+logit(strength(this.stat(id,j))))/2;lift=Math.max(lift,.6*(logit(strength(p,1/(1+Math.exp(-baseline)),180))-baseline));}
+        return {c,score,potential:score+lift};});
+      const pool=[...new Map([...ranked.sort((a,b)=>b.score-a.score).slice(0,24),...ranked.sort((a,b)=>b.potential-a.potential).slice(0,12)].map(x=>[x.c.id,x])).values()];
       const next:typeof beam=[];for(const item of beam)for(const {c}of pool){if([...item.team,...enemy,...d.bans].includes(c.id))continue;const team=item.team.slice();team[slot]=c.id;next.push({team,...this.score(team,enemy,players)});}next.sort((a,b)=>b.score-a.score||a.team.join().localeCompare(b.team.join()));beam=next.slice(0,64);
     }
     return beam.slice(0,3).map((b,i)=>({rank:i+1,parts:Object.fromEntries(slots.map(s=>[s,b.team[s]])),rankingScore:b.score,evidenceTrace:this.score(b.team,enemy,players,true),collective:this.collective(b.team,enemy,players),proposedGroup:this.group(b.team.map((c,s)=>slots.includes(s)?c:null)),sample:Math.min(...slots.map(s=>this.stat(b.team[s]!,s).n||0)),explanation:'Score heuristique : base champion ×0,4, duels ×0,8 corrigés du niveau statistique adverse, duos régularisés et normalisés par taille d’équipe, personnel ×0,4. Détail vérifiable ci-dessous ; aucune probabilité prédite.',stats:slots.map(s=>({slot:s,champion:b.team[s],stat:this.stat(b.team[s]!,s)}))}));
