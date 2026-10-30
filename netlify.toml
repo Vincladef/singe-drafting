@@ -1,0 +1,29 @@
+[build]
+  command = "npm run netlify:build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://ddragon.leagueoflegends.com; connect-src 'self' https://*.neon.tech https://*.neon.build https://*.neon.com; frame-src https://*.neon.tech https://*.neon.build https://*.neon.com; object-src 'none'; base-uri 'self'; form-action 'self' https://*.neon.tech https://*.neon.build https://*.neon.com"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

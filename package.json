@@ -1,0 +1,28 @@
+{
+  "name": "singe-drafting",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "netlify:build": "npm run test && tsx scripts/prepare.ts && npm run build",
+    "test": "tsx --test tests/*.test.ts",
+    "test:ui": "playwright test",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@neondatabase/auth": "latest",
+    "@neondatabase/serverless": "latest",
+    "@netlify/functions": "latest",
+    "jose": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest",
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}
