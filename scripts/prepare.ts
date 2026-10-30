@@ -1,7 +1,7 @@
 import { mkdir,readFile,writeFile,stat } from 'node:fs/promises';
 import { neon } from '@neondatabase/serverless';
 import { cache,status,env } from '../server/db.ts';
-import { collect } from '../server/ingest.ts';
+import { providerCatalog,refreshProvider,snapshot } from '../server/opgg-store.ts';
 import type { Champion } from '../server/types.ts';
 import sharp from 'sharp';
 
@@ -28,21 +28,25 @@ async function prepare(){
   await sharp('public/assets/monkey.jpg').resize({width:1600,withoutEnlargement:true}).webp({quality:82}).toFile('public/assets/monkey.webp');
   const versions=await (await fetch('https://ddragon.leagueoflegends.com/api/versions.json')).json();
   const version=versions[0];const payload=await (await fetch(`https://ddragon.leagueoflegends.com/cdn/${version}/data/fr_FR/champion.json`)).json();
-  const champions:Champion[]=Object.values(payload.data).map((c:any)=>({id:c.id,key:c.key,name:c.name,tags:c.tags}));
-  for(let i=0;i<champions.length;i+=12)await Promise.all(champions.slice(i,i+12).map(c=>download(`https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${c.id}.png`,`public/assets/champions/${c.id}.png`)));
-  await writeFile('public/data/catalog.json',JSON.stringify({version,champions}));
-  console.log(`Assets: licensed photo and ${champions.length} official champion portraits (${version}).`);
-  if(!env('DATABASE_URL')){console.log('Database not configured; static assets prepared.');return;}
+  if(!env('DATABASE_URL')){throw new Error('DATABASE_URL is required for OP.GG snapshots.');}
   const sql=neon(env('DATABASE_URL'));
   await sql.transaction(statements(await readFile('migrations/001_initial.sql','utf8')).map(s=>sql.query(s)));
   await sql.transaction(statements(await readFile('migrations/002_timeline_sampling.sql','utf8')).map(s=>sql.query(s)));
   await sql.transaction(statements(await readFile('migrations/003_collection.sql','utf8')).map(s=>sql.query(s)));
-  await cache('catalog',{version,champions},7*86400,'Riot Data Dragon');
+  await sql.transaction(statements(await readFile('migrations/004_opgg.sql','utf8')).map(s=>sql.query(s)));
+  const official:Champion[]=Object.values(payload.data).map((c:any)=>({id:c.id,key:c.key,name:c.name,tags:c.tags}));
+  const provider=await providerCatalog();
+  const champions:Champion[]=provider.map(c=>({...c,name:official.find(x=>x.id===c.id)?.name||c.name,tags:official.find(x=>x.id===c.id)?.tags||[]}));
+  for(let i=0;i<champions.length;i+=12)await Promise.all(champions.slice(i,i+12).map(c=>download(`https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${c.id}.png`,`public/assets/champions/${c.id}.png`)));
+  await writeFile('public/data/catalog.json',JSON.stringify({version,champions}));
+  console.log(`Assets: licensed photo and ${champions.length} official champion portraits (${version}).`);
+  await cache('catalog',{version,champions},30*86400,'OP.GG MCP catalogue + Data Dragon translated names and portraits');
   console.log('Database migrations applied.');
   await sql.transaction(champions.map(c=>sql`insert into drafting.champions(id,riot_key,name,tags) values(${c.id},${Number(c.key)},${c.name},${JSON.stringify(c.tags||[])}::jsonb) on conflict(id) do update set name=excluded.name,tags=excluded.tags,updated_at=now()`));
-  // One small bootstrapping batch per build, with the same shared API budget as runtime.
-  const results=[];for(let i=0;i<4;i++){const r=await collect(5,true);results.push(r);if(r.reason)break;}
-  await writeFile('public/data/build-status.json',JSON.stringify({builtAt:new Date().toISOString(),assets:true,database:true,ingestion:results}));
+  const ingestion={ranked:await refreshProvider('ranked'),flex:await refreshProvider('flex')};
+  const data=await snapshot('ranked');
+  if(data.completed.length<50)throw new Error('OPGG_INSUFFICIENT_INITIAL_COVERAGE');
+  await writeFile('public/data/build-status.json',JSON.stringify({builtAt:new Date().toISOString(),assets:true,database:true,source:'OP.GG MCP',ingestion}));
   if(env('OPENAI_API_KEY')){
     try{
       const res=await fetch('https://api.openai.com/v1/models/gpt-6-luna',{headers:{authorization:`Bearer ${env('OPENAI_API_KEY')}`},signal:AbortSignal.timeout(10000)});

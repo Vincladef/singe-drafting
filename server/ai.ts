@@ -6,7 +6,7 @@ export const AI_MODEL='gpt-6-luna';
 export async function ask(user:string,draft:Draft,question:string){
   const {result,engine}=await analyze(draft,user),cat=await catalog();
   const comparisons=cat.champions.filter(c=>question.toLowerCase().includes(c.name.toLowerCase())).slice(0,4).map(c=>{
-    const byRole=Array.from({length:5},(_,i)=>({role:i,stat:engine.stat(c.id,i)})).sort((a,b)=>b.stat.n-a.stat.n);
+    const byRole=Array.from({length:5},(_,i)=>({role:i,stat:engine.stat(c.id,i)})).sort((a,b)=>(b.stat.n||0)-(a.stat.n||0));
     const role=draft.blue.indexOf(c.id)>=0?draft.blue.indexOf(c.id):byRole[0].role;
     const lineup=draft.blue.slice();lineup[role]=c.id;
     return {champion:c.name,global:engine.stat(c.id),byRole,
@@ -15,7 +15,7 @@ export async function ask(user:string,draft:Draft,question:string){
       directMatchup:draft.red[role]?engine.matchup(c.id,role,draft.red[role]!):null,
       rankingHeuristicNotProbability:engine.score(lineup,draft.red).score};
   });
-  const context={draft:{blue:draft.blue,red:draft.red,bans:draft.bans},...result,comparisons};
+  const context={draft:{blue:draft.blue,red:draft.red,bans:draft.bans},...result,context:{...result.context,computedAt:undefined},comparisons};
   const key=`ai:${hash(user)}:${hash(JSON.stringify(context)+question)}`;const hit=await cached<{answer:string;model:string}>(key);if(hit)return {...hit,cached:true};
   if(!await quota(`ai:${hash(user)}`,20)||!await quota('ai:global',200,86400))throw new HttpError(429,'Limite d’analyses atteinte. Réessaie plus tard.');
   if(!env('OPENAI_API_KEY'))throw new HttpError(503,'L’avis du singe est momentanément indisponible.');

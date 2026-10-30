@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { parseOpggResult } from './opgg-format.ts';
+import { env,quota } from './db.ts';
 export const OPGG_ENDPOINT='https://mcp-api.op.gg/mcp';
 const ALLOWED=new Set(['lol_list_champions','lol_list_lane_meta_champions','lol_get_champion_analysis','lol_get_champion_synergies','lol_get_lane_matchup_guide','lol_get_summoner_profile','lol_list_summoner_matches']);
 export class OpggError extends Error{constructor(public code:string){super(code);}}
@@ -10,6 +11,7 @@ export async function withOpgg<T>(fn:(call:(name:string,args:Record<string,unkno
     await client.connect(new StreamableHTTPClientTransport(new URL(OPGG_ENDPOINT)),{timeout:15000});
     return await fn(async(name,args)=>{
       if(!ALLOWED.has(name))throw new OpggError('UNSUPPORTED_TOOL');
+      if(env('DATABASE_URL')&&!await quota('opgg:requests',1000,3600))throw new OpggError('OPGG_RATE_LIMIT');
       const result=await client.callTool({name,arguments:args},undefined,{timeout:20000});
       return parseOpggResult(result);
     });

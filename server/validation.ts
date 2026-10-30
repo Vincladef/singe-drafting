@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PLATFORMS } from './riot.ts';
+import { PLATFORMS } from './opgg-player.ts';
 const champion=z.string().regex(/^[A-Za-z0-9]+$/).max(40);
 export const filterSchema=z.object({patch:z.string().regex(/^(all|\d{1,2}\.\d{1,2})$/),platform:z.enum(['all',...Object.keys(PLATFORMS)] as [string,...string[]]),queue:z.union([z.literal(420),z.literal(440)]),days:z.union([z.literal(7),z.literal(14),z.literal(30),z.literal(90)]),tier:z.enum(['all','IRON','BRONZE','SILVER','GOLD','PLATINUM','EMERALD','DIAMOND','MASTER','GRANDMASTER','CHALLENGER'])});
 export const draftSchema=z.object({blue:z.array(champion.nullable()).length(5),red:z.array(champion.nullable()).length(5),

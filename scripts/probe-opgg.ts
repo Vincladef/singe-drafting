@@ -1,5 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { analysisArgs,emptySnapshot } from '../server/opgg-store.ts';
+import { mergeAnalysis } from '../server/opgg-data.ts';
+import { parseOpggResult } from '../server/opgg-format.ts';
 import { mkdir,writeFile } from 'node:fs/promises';
 const client=new Client({name:'singe-drafting-provider-verification',version:'1.0.0'},{capabilities:{}});
 try{
@@ -21,5 +24,8 @@ try{
     try{const result=await client.callTool(request,undefined,{timeout:45000});await writeFile(`provider-probe/${request.name}.json`,JSON.stringify(result,null,2));console.log(request.name,'ok');}
     catch(e){await writeFile(`provider-probe/${request.name}.json`,JSON.stringify({error:String(e)}));console.log(request.name,'unavailable');}
   }
+  const normalized=emptySnapshot([{id:'Nunu',key:'20',name:'Nunu & Willump'},{id:'Jinx',key:'222',name:'Jinx'}],'ranked');
+  for(const c of normalized.champions){try{const r=c.id==='Nunu'?'JUNGLE':'ADC';mergeAnalysis(normalized,c,r,parseOpggResult(await client.callTool({name:'lol_get_champion_analysis',arguments:analysisArgs(c,r,'ranked')},undefined,{timeout:45000})));}catch(e){normalized.failures.push(c.id);}}
+  await writeFile('provider-probe/normalized.json',JSON.stringify(normalized));
   console.log(JSON.stringify({server:client.getServerVersion(),tools:tools.map(t=>t.name)}));
 }finally{await client.close();}
