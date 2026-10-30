@@ -8,6 +8,8 @@ import { PLATFORMS,parseRiotId,playerProfile,publicProfile,suggestPublicProfile 
 import { snapshot } from '../../server/opgg-store.ts';
 import { OpggError } from '../../server/opgg-client.ts';
 import { ask } from '../../server/ai.ts';
+import { supplementaryMatchup } from '../../server/matchup-detail.ts';
+import { ROLES } from '../../server/types.ts';
 import { buildInfo } from '../../server/build-info.ts';
 
 const uuid=z.uuid();
@@ -33,6 +35,12 @@ export default async (req:Request,context:Context)=>{
     if(path==='coverage'&&req.method==='GET'){
       const data=await snapshot(new URL(req.url).searchParams.get('queue')==='440'?'flex':'ranked');
       return json({source:'OP.GG MCP',context:data.context,completed:data.completed.length,total:data.champions.length,matchups:Object.keys(data.matchups).length,synergies:Object.keys(data.synergies).length,stale:Date.now()-Date.parse(data.context.fetchedAt)>21600000});
+    }
+    if(path==='matchup-detail'&&req.method==='GET'){
+      const q=new URL(req.url).searchParams,input=z.object({champion:z.string().max(40),opponent:z.string().max(40),role:z.enum(ROLES)}).parse(Object.fromEntries(q));
+      const cat=await catalog(),english=(await snapshot('ranked')).champions,c=english.find(c=>c.id===input.champion),e=english.find(c=>c.id===input.opponent);if(!c||!e)throw new HttpError(400,'Champion inconnu.');
+      if(!await quota(`guide:${hash(context.ip||'unknown')}`,12,600))throw new HttpError(429,'Trop de fiches rapprochées.');
+      return json(await supplementaryMatchup(c,e,input.role,cat.champions));
     }
     if(path==='players/suggest'&&req.method==='GET'){
       const params=new URL(req.url).searchParams,input=z.object({q:z.string().trim().min(2).max(60),platform:z.enum(Object.keys(PLATFORMS) as [string,...string[]])}).parse({q:params.get('q'),platform:params.get('platform')});

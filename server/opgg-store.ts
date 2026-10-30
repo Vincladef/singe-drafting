@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { db,cache,status } from './db.ts';
+import { db,cache,cached,status } from './db.ts';
 import { withOpgg } from './opgg-client.ts';
 import { championCode,championId,lane,mergeAnalysis,role,type GameMode,type OpggSnapshot } from './opgg-data.ts';
 import { ROLES,type Champion,type Role } from './types.ts';
@@ -34,9 +34,9 @@ export async function refreshProvider(mode:GameMode='ranked',maxMs=480000){
     const current=await db()`select value from drafting.cache where key='opgg:catalog'`;
     const champions:Champion[]=current[0]?.value?.champions||previous.champions;
     if(!champions.length)throw new Error('OPGG_NO_CATALOG');
-    if(Date.now()-Date.parse(previous.context.fetchedAt)<SNAPSHOT_SECONDS*1000&&previous.completed.length>=champions.length*.95)return {cached:true,completed:previous.completed.length};
+    const fresh=Date.now()-Date.parse(previous.context.fetchedAt)<SNAPSHOT_SECONDS*1000&&previous.completed.length>=champions.length*.95;
     const work=await db()`select value from drafting.cache where key=${'opgg:working:'+mode} and expires_at>now()`;
-    s=work[0]?.value&&Date.now()-Date.parse(work[0].value.context.fetchedAt)<SNAPSHOT_SECONDS*1000?work[0].value:emptySnapshot(champions,mode);
+    s=fresh?previous:work[0]?.value&&Date.now()-Date.parse(work[0].value.context.fetchedAt)<SNAPSHOT_SECONDS*1000?work[0].value:emptySnapshot(champions,mode);
     s.champions=champions;
     const meta=await call('lol_list_lane_meta_champions',{position:'all',lang:'en_US',desired_output_fields:ROLES.map(r=>`data.positions.${lane(r)}[].{champion,play}`)});
     const primary=new Map<string,{role:Role;n:number}>();
@@ -48,6 +48,14 @@ export async function refreshProvider(mode:GameMode='ranked',maxMs=480000){
       catch{s.failures=[...new Set([...s.failures,c.id])];errors++;if(errors>=5)break;}
       if(changed%10===0)await save();
       await new Promise(resolve=>setTimeout(resolve,250));
+    }
+    // Incrementally enrich documented secondary roles; retain the exact All Tiers + queue contract.
+    let secondary=0;
+    for(const [pos,rows]of Object.entries(meta.data?.positions||{}) as [string,any[]][]){const r=role(pos);if(!r)continue;
+      for(const row of rows||[]){if(secondary>=20||errors>=5||Date.now()-start>maxMs)break;const id=championId(champions,row.champion),c=champions.find(c=>c.id===id);if(!c||primary.get(c.id)?.role===r||row.play<1000)continue;
+        const key=`opgg:role:${mode}:${c.id}:${r}`;if(await cached(key))continue;
+        try{const value=await call('lol_get_champion_analysis',analysisArgs(c,r,mode));if(s.context.patch&&value.data?.trends?.win?.version&&String(value.data.trends.win.version)!==s.context.patch)continue;mergeAnalysis(s,c,r,value);await cache(key,{fetchedAt:new Date().toISOString()},21600,'OP.GG MCP All Tiers role');secondary++;}catch{errors++;}
+      }
     }
     await save();await status('opgg','ready',{mode,champions:s.completed.length,total:champions.length,matchups:Object.keys(s.matchups).length,synergies:Object.keys(s.synergies).length,failures:s.failures,context:s.context,requestsThisRun:changed+errors+1});
     return {changed,errors,completed:s.completed.length,total:champions.length};

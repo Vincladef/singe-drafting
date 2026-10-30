@@ -21,6 +21,7 @@ export interface Draft {
   filter:Filter;
 }
 export interface Stat {
+  derivation?:{kind:'reciprocal';from:string};
   n:number|null; wins:number|null; wr:number|null; interval:[number,number]|null;
   kda:number|null; cs:number|null; dpm:number|null; vision:number|null;
   gold15:number|null; gd15:number|null; xp15:number|null; xpd15:number|null;

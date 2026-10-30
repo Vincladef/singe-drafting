@@ -44,3 +44,11 @@ export function mergeAnalysis(snapshot:OpggSnapshot,champion:Champion,requestedR
   if(trend?.created_at)snapshot.context.upstreamUpdatedAt=trend.created_at;
   snapshot.completed=[...new Set([...snapshot.completed,champion.id])];snapshot.failures=snapshot.failures.filter(x=>x!==champion.id);
 }
+
+// A match has one winner: an exact directed count also documents the reverse duel.
+// Never add the reciprocal sample to the original or overwrite a provider observation.
+export function completeReciprocalMatchups(snapshot:OpggSnapshot){
+ for(const [key,s]of Object.entries(snapshot.matchups)){const [a,b]=key.split('>');if(!a||!b||s.n===null||s.wins===null||!s.n)continue;const reverse=b+'>'+a;
+  if(!snapshot.matchups[reverse])snapshot.matchups[reverse]={...publishedStat({play:s.n,win:s.n-s.wins}),derivation:{kind:'reciprocal',from:key}} as Stat;
+ }
+}

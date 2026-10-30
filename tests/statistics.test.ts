@@ -45,3 +45,12 @@ test('Personal aggregates are season-labelled, separate from general stats and r
 });
 test('Validation blocks duplicates, occupied slots and excessive controls',()=>{assert.ok(draftSchema.safeParse(draft).success);assert.equal(draftSchema.safeParse({...draft,bans:['C0']}).success,false);assert.equal(draftSchema.safeParse({...draft,selected:{blue:[0],red:[]}}).success,false);});
 test('Migration splitter preserves SQL blocks',()=>{assert.equal(statements("select ';'; DO $$ BEGIN perform 1; END $$; select 2;").length,3);});
+test('Exact reciprocal counters fill missing duels without doubling samples or overwriting observations',()=>{
+ const s=sample();s.matchups['JUNGLE:C0>JUNGLE:C1']=publishedStat({play:100,win:60});const e=new Engine(s);
+ assert.equal(e.matchup('C1',1,'C0').wr,40);assert.equal(e.matchup('C1',1,'C0').n,100);assert.equal(e.matchup('C1',1,'C0').derivation?.from,'JUNGLE:C0>JUNGLE:C1');
+});
+test('Documented matchup can overturn higher individual WR and score trace reconciles exactly',()=>{
+ const s=sample();s.stats['TOP:C0']=publishedStat({play:10000,win:5400});s.stats['TOP:C1']=publishedStat({play:10000,win:5100});s.matchups['TOP:C0>TOP:C5']=publishedStat({play:10000,win:3500});s.matchups['TOP:C1>TOP:C5']=publishedStat({play:10000,win:6000});const e=new Engine(s),a=e.score(['C0',null,null,null,null],draft.red,{},true),b=e.score(['C1',null,null,null,null],draft.red,{},true);
+ assert.ok(b.score>a.score);assert.ok(Math.abs(b.components.reduce((v,x)=>v+x.contribution,0)-b.score)<1e-12);assert.equal(b.components.find(x=>x.kind==='duel').stat.n,10000);
+ assert.ok(e.score(['C2','C3',null,null,null],draft.red,{},true).missing.some(x=>x.kind==='duo'));
+});
