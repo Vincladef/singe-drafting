@@ -12,6 +12,7 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@neondatabase/auth": "latest",
     "@neondatabase/serverless": "latest",
     "@netlify/functions": "latest",
