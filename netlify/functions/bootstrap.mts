@@ -6,7 +6,7 @@ export default {
   async deploySucceeded(){
     const start=Date.now();let imported=0;
     while(Date.now()-start<8*60000){
-      const count=await db()`select count(*)::int as n from drafting.matches`;
+      const count=await db()`select count(*)::int as n from drafting.matches where started_at>now()-interval '30 days'`;
       if(count[0].n>=180)break;
       const result=await collect(5,true);imported+=result.imported;
       if(result.reason&&['RIOT_401','RIOT_403','RIOT_503','no_seed_puuid','catalog_unavailable','IMPORT_FAILED'].includes(result.reason))break;

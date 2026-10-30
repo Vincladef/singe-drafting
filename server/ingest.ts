@@ -36,6 +36,7 @@ export async function importMatch(id:string,platform:string,catalog:Champion[]){
   let timeline:any;
   try{timeline=await riot(routing(platform),`/lol/match/v5/matches/${encodeURIComponent(id)}/timeline`,0);}catch(e){if(e instanceof RiotError&&[401,403,429].includes(e.status))throw e;}
   const game=normalizeMatch(raw,platform,catalog,timeline);if(!game)return false;
+  if(timeline)await status('timeline','reachable',{frames:timeline.info?.frames?.length||0,firstTimes:(timeline.info?.frames||[]).slice(0,3).map((f:any)=>f.timestamp),sampled15:frameAt(timeline.info?.frames,15)?.timestamp??null});
   const queries=[sql`insert into drafting.matches(id,patch,platform,queue,started_at,duration,bans,timeline_status)
     values(${game.id},${game.patch},${game.platform},${game.queue},${new Date(game.started).toISOString()},${game.duration},${JSON.stringify(game.bans)}::jsonb,${timeline?'complete':'pending'})
     on conflict(id) do update set timeline_status=excluded.timeline_status`];
@@ -87,7 +88,9 @@ export async function collect(limit=4,eager=false){
       if(!inserted[0])return {imported:0,reason:'cohort_already_sampled'};job=inserted[0];
     }
     const {puuid,platform,accountId}=job.payload;
-    const ids=await riot<string[]>(routing(platform),`/lol/match/v5/matches/by-puuid/${encodeURIComponent(puuid)}/ids?start=0&count=30&type=ranked`,300);
+    const lookback=job.kind==='cohort'?30:90;
+    const startTime=Math.floor((Date.now()-lookback*86400000)/1000);
+    const ids=await riot<string[]>(routing(platform),`/lol/match/v5/matches/by-puuid/${encodeURIComponent(puuid)}/ids?start=0&count=30&type=ranked&startTime=${startTime}`,300);
     for(const id of ids.slice(job.cursor,job.cursor+limit)){if(await importMatch(id,platform,catalog))imported++;}
     const cursor=job.cursor+limit,done=cursor>=ids.length;
     await sql`update drafting.jobs set status=${done?'complete':'pending'},cursor=${cursor},lease_until=null,available_at=now()+interval '5 minutes',updated_at=now(),last_error=null where key=${job.key}`;
