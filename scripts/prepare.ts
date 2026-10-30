@@ -32,11 +32,12 @@ async function prepare(){
   if(!env('DATABASE_URL')){console.log('Database not configured; static assets prepared.');return;}
   const sql=neon(env('DATABASE_URL'));
   await sql.transaction(statements(await readFile('migrations/001_initial.sql','utf8')).map(s=>sql.query(s)));
+  await sql.transaction(statements(await readFile('migrations/002_timeline_sampling.sql','utf8')).map(s=>sql.query(s)));
   await cache('catalog',{version,champions},7*86400,'Riot Data Dragon');
   console.log('Database migrations applied.');
   await sql.transaction(champions.map(c=>sql`insert into drafting.champions(id,riot_key,name,tags) values(${c.id},${Number(c.key)},${c.name},${JSON.stringify(c.tags||[])}::jsonb) on conflict(id) do update set name=excluded.name,tags=excluded.tags,updated_at=now()`));
   // One small bootstrapping batch per build, with the same shared API budget as runtime.
-  const results=[await collect(18)];
+  const results=[];for(let i=0;i<4;i++){const r=await collect(5,true);results.push(r);if(r.reason)break;}
   await writeFile('public/data/build-status.json',JSON.stringify({builtAt:new Date().toISOString(),assets:true,database:true,ingestion:results}));
   if(env('OPENAI_API_KEY')){
     try{
@@ -46,5 +47,6 @@ async function prepare(){
     }catch{await status('openai','unreachable',{model:'gpt-6-luna'});}
   }
   console.log('Bootstrap complete. No credentials are included in published assets.');
+  const {verifyBackend}=await import('./verify-backend.ts');await verifyBackend();
 }
 if(process.argv[1]?.endsWith('prepare.ts'))await prepare();

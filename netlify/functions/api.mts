@@ -19,7 +19,7 @@ export default async (req:Request,context:Context)=>{
     if(path==='catalog'&&req.method==='GET')return json(await catalog());
     if(path==='health'&&req.method==='GET'){
       const [providers,matches]=await Promise.all([db()`select provider,status,details,checked_at from drafting.provider_status`,db()`select count(*)::int as count,max(imported_at) as refreshed_at from drafting.matches`]);
-      return json({ok:true,version:'1.0.0',database:'reachable',matches:matches[0],providers,riotPublication:'Une réponse API valide ne prouve pas l’autorisation de publication. À confirmer dans le portail Riot.',rso:'not_configured'});
+      return json({ok:true,version:'1.0.0',commit:env('COMMIT_REF'),database:'reachable',matches:matches[0],providers,riotPublication:'Une réponse API valide ne prouve pas l’autorisation de publication. À confirmer dans le portail Riot.',rso:'not_configured'});
     }
     if(path==='metadata'&&req.method==='GET'){
       const [patches,regions]=await Promise.all([db()`select patch,count(*)::int as games from drafting.matches group by patch order by max(started_at) desc limit 20`,db()`select platform,count(*)::int as games from drafting.matches group by platform`]);

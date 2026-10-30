@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { wilson,posterior,summarize } from '../server/statistics.ts';
 import { Engine } from '../server/engine.ts';
 import { draftSchema } from '../server/validation.ts';
-import { normalizeMatch } from '../server/ingest.ts';
+import { normalizeMatch,frameAt } from '../server/ingest.ts';
 import { statements } from '../scripts/prepare.ts';
 import {features,predict,trainModel,type ModelArtifact} from '../server/model.ts';
 import type { Champion,Draft,Game,Participant } from '../server/types.ts';
@@ -56,6 +56,11 @@ test('Match normalization rejects remakes and ambiguous roles; no fabricated tim
   raw.info.gameDuration=1800;raw.info.participants[0].teamPosition='';assert.equal(normalizeMatch(raw,'EUW1',catalog),null);
 });
 test('Migration splitter preserves PL/pgSQL blocks and quoted semicolons',()=>{assert.equal(statements("select ';'; DO $$ BEGIN perform 1; END $$; select 2;").length,3);});
+test('Timeline frames tolerate recorded clock drift without accepting a missing minute',()=>{
+  assert.equal(frameAt([{timestamp:840010},{timestamp:900024},{timestamp:960000}],15).timestamp,900024);
+  assert.equal(frameAt([{timestamp:840010},{timestamp:960000}],15),null);
+  assert.equal(frameAt(undefined,15),null);
+});
 test('Predictive features are antisymmetric, probabilities complement, incomplete drafts rejected',()=>{
   const b=['C0','C1','C2','C3','C4'],r=['C5','C6','C7','C8','C9'];
   const f=features(b,r),inverse=features(r,b);for(const [i,v]of f)assert.ok(Math.abs(v+(inverse.get(i)||0))<1e-10);

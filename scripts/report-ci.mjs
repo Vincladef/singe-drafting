@@ -1,0 +1,3 @@
+const state=process.env.SINGE_STATUS==='success'?'success':'failure';
+const response=await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/statuses/${process.env.GITHUB_SHA}`,{method:'POST',headers:{authorization:`Bearer ${process.env.GITHUB_TOKEN}`,'content-type':'application/json'},body:JSON.stringify({state,context:'Singe production',description:state==='success'?'Tests navigateur et OAuth initial validés sur Netlify':'Contrôle navigateur à examiner dans GitHub Actions',target_url:`https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`})});
+if(!response.ok)throw new Error(`Could not report check status (${response.status}).`);
