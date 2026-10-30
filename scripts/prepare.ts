@@ -3,6 +3,7 @@ import { neon } from '@neondatabase/serverless';
 import { cache,status,env } from '../server/db.ts';
 import { collect } from '../server/ingest.ts';
 import type { Champion } from '../server/types.ts';
+import sharp from 'sharp';
 
 export function statements(sql:string){
   const out:string[]=[];let start=0,quote=false,dollar=false;
@@ -24,6 +25,7 @@ async function prepare(){
   await mkdir('public/assets/champions',{recursive:true});await mkdir('public/data',{recursive:true});
   // Original CC BY 2.0 photo, bundled in the deploy. The page never hotlinks it.
   await download('https://upload.wikimedia.org/wikipedia/commons/1/1d/Chimpanzee_Portrait.jpg','public/assets/monkey.jpg');
+  await sharp('public/assets/monkey.jpg').resize({width:1600,withoutEnlargement:true}).webp({quality:82}).toFile('public/assets/monkey.webp');
   const versions=await (await fetch('https://ddragon.leagueoflegends.com/api/versions.json')).json();
   const version=versions[0];const payload=await (await fetch(`https://ddragon.leagueoflegends.com/cdn/${version}/data/fr_FR/champion.json`)).json();
   const champions:Champion[]=Object.values(payload.data).map((c:any)=>({id:c.id,key:c.key,name:c.name,tags:c.tags}));

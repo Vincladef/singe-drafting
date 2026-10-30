@@ -9,4 +9,5 @@ playwright-report/
 public/data/
 public/assets/champions/
 public/assets/monkey.jpg
+public/assets/monkey.webp
 *.log

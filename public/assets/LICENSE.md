@@ -4,7 +4,7 @@
 Source : https://commons.wikimedia.org/wiki/File:Chimpanzee_Portrait.jpg
 Original : https://flickr.com/photos/132033298@N04/29947102614
 Licence CC BY 2.0 : https://creativecommons.org/licenses/by/2.0/
-Recadrage et teinte par CSS. Photographie réelle, sans génération IA.
+Redimensionnement et compression WebP, recadrage et teinte par CSS. Photographie réelle, sans génération IA.
 Le build télécharge le fichier puis l’intègre aux ressources déployées. Il échoue si la photographie n’est pas disponible.
 
 # Champions

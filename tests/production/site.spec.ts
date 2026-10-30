@@ -15,8 +15,12 @@ test('Published assets, live API, draft and protected profile',async({page,reque
 });
 test('Google login initiates an authorized provider redirect',async({page})=>{
   await page.goto('/');await page.locator('#account-btn').click();
-  const session=page.waitForResponse(r=>r.url().includes('/sign-in/social'),{timeout:30000});
-  await page.locator('#google-login').click();const response=await session;expect(response.ok()).toBeTruthy();
-  const result=await response.json();expect(result.url).toMatch(/^https:\/\/(accounts\.google\.com|[^/]+\.neon\.(tech|build|com))\//);
+  let result:any;
+  await page.route('**/sign-in/social',async route=>{
+    const response=await route.fetch();expect(response.ok()).toBeTruthy();
+    result=await response.json();await route.fulfill({response,json:result});
+  });
+  await page.locator('#google-login').click();
+  await expect.poll(()=>result?.url,{timeout:30000}).toMatch(/^https:\/\/(accounts\.google\.com|[^/]+\.neon\.(tech|build|com))\//);
   // Stop at the provider boundary. No identity, password, consent or fake user is used.
 });
