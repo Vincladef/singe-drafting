@@ -20,12 +20,13 @@ try{
     {name:'lol_get_lane_matchup_guide',arguments:{my_champion:'AHRI',opponent_champion:'AKALI',position:'mid',lang:'en_US'}},
     {name:'lol_get_summoner_profile',arguments:{game_name:'Faker',tag_line:'KR1',region:'KR',lang:'en_US',desired_output_fields:['data.summoner.{game_name,tagline,region,updated_at}','data.summoner.league_stats[].{game_type,win,lose,updated_at}','data.summoner.league_stats[].tier_info.{tier,division,lp}','data.summoner.most_champions.{game_type,play,win,lose,season_id,year}','data.summoner.most_champions.champion_stats[].{id,champion_name,play,win,lose,kill,death,assist,game_length_second,minion_kill,neutral_minion_kill,damage_dealt_to_champions}','data.summoner.ranked_most_champions.{game_type,play,win,lose,season_id}','data.summoner.ranked_most_champions.my_champion_stats[].{id,champion_name,play,win,lose,game_second}','data.summoner.ranked_most_champions.my_champion_stats[].basic.{kill,death,assist,cs,damage_to_champion,vision_score,kill_participation}']}}
   ];
+  let probeCatalog:any[]=[];
   for(const request of calls){
-    try{const result=await client.callTool(request,undefined,{timeout:45000});await writeFile(`provider-probe/${request.name}.json`,JSON.stringify(result,null,2));console.log(request.name,'ok');}
+    try{const result=await client.callTool(request,undefined,{timeout:45000});if(request.name==='lol_list_champions')probeCatalog=parseOpggResult(result).data.champions.filter((c:any)=>/^[A-Za-z0-9]+$/.test(c.key)).map((c:any)=>({id:c.key,key:String(c.champion_id),name:c.name}));await writeFile(`provider-probe/${request.name}.json`,JSON.stringify(result,null,2));console.log(request.name,'ok');}
     catch(e){await writeFile(`provider-probe/${request.name}.json`,JSON.stringify({error:String(e)}));console.log(request.name,'unavailable');}
   }
-  const normalized=emptySnapshot([{id:'Nunu',key:'20',name:'Nunu & Willump'},{id:'Jinx',key:'222',name:'Jinx'}],'ranked');
-  for(const c of normalized.champions){try{const r=c.id==='Nunu'?'JUNGLE':'ADC';mergeAnalysis(normalized,c,r,parseOpggResult(await client.callTool({name:'lol_get_champion_analysis',arguments:analysisArgs(c,r,'ranked')},undefined,{timeout:45000})));}catch(e){normalized.failures.push(c.id);}}
+  const normalized=emptySnapshot(probeCatalog,'ranked');
+  for(const c of normalized.champions.filter(c=>['Nunu','Jinx','Ahri','Fiddlesticks','MissFortune','Rell'].includes(c.id))){try{const r=c.id==='Nunu'||c.id==='Fiddlesticks'?'JUNGLE':c.id==='Ahri'?'MID':c.id==='Rell'?'SUPPORT':'ADC';mergeAnalysis(normalized,c,r,parseOpggResult(await client.callTool({name:'lol_get_champion_analysis',arguments:analysisArgs(c,r,'ranked')},undefined,{timeout:45000})));}catch(e){normalized.failures.push(c.id);}}
   await writeFile('provider-probe/normalized.json',JSON.stringify(normalized));
   console.log(JSON.stringify({server:client.getServerVersion(),tools:tools.map(t=>t.name)}));
 }finally{await client.close();}
