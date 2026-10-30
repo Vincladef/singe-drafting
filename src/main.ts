@@ -1,5 +1,7 @@
 import './mockup.css';
 import './extra.css';
+import { sessionToken } from './session.ts';
+import { attachPlayerSearch,rememberPlayer,type PlayerIdentity } from './player-search.ts';
 import { createAuthClient } from '@neondatabase/auth';
 import { BetterAuthVanillaAdapter } from '@neondatabase/auth/vanilla/adapters';
 const makeAuth=(url:string)=>createAuthClient(url,{adapter:BetterAuthVanillaAdapter()});
@@ -14,6 +16,8 @@ let champions:Champion[]=fallback,mode='manual',analysis:any=null;
 let auth:ReturnType<typeof makeAuth>|null=null,user:{id:string;name:string}|null=null,accounts:any[]=[];
 let authReady:Promise<void>;
 let myAccountId='',myRole=1;
+let myPublicIdentity:PlayerIdentity|null=null,refreshingPublic=false,publicRetryAt=0;
+let tokenPending:Promise<string|null>|null=null;
 let globalOn=true,personalOn=false,shown=['wr','vs','n'];
 let draft:Draft={blue:Array(5).fill(null),red:Array(5).fill(null),selected:{blue:[0,1,2,3,4],red:[0,1,2,3,4]},bans:[],players:[],filter:{patch:'all',platform:'all',queue:420,days:30,tier:'all'}};
 let sequence=0,timer:ReturnType<typeof setTimeout>,controller:AbortController|null=null,preferenceTimer:ReturnType<typeof setTimeout>;
@@ -33,38 +37,39 @@ function value(s:any,k:string){
 const interval=(s:any)=>s?.interval?`${format(s.interval[0])}–${format(s.interval[1])} %`:'indisponible';
 function toast(message:string){$('toast').textContent=message;$('toast').hidden=false;setTimeout(()=>$('toast').hidden=true,5000);}
 async function api(path:string,options:RequestInit={},privateRequest=false){
-  const headers=new Headers(options.headers);if(options.body)headers.set('content-type','application/json');
-  if(user&&auth){
-    const t=await auth.token();if(t.data?.token)headers.set('authorization',`Bearer ${t.data.token}`);
-    else if(privateRequest)throw new Error('Session expirée. Reconnecte-toi.');
-  }else if(privateRequest)throw new Error('Connecte-toi avec Google pour utiliser cette fonction.');
-  const res=await fetch(`/api/${path}`,{...options,headers});
-  const data=await res.json().catch(()=>({error:'Service indisponible.'}));
-  if(!res.ok)throw new Error(data.error||'Service indisponible.');return data;
+ const headers=new Headers(options.headers);if(options.body)headers.set('content-type','application/json');
+ const obtain=async(refresh=false)=>{if(!auth)return null;if(!tokenPending)tokenPending=sessionToken(auth,refresh).finally(()=>tokenPending=null);return tokenPending;};
+ if(privateRequest){if(!user||!auth)throw new Error('Connecte-toi avec Google pour conserver tes données dans ton espace.');const token=await obtain();if(token)headers.set('authorization','Bearer '+token);else throw new Error('La session Google n’est plus disponible. Les profils OP.GG restent consultables sans connexion.');}
+ let res=await fetch(`/api/${path}`,{...options,headers});
+ if(privateRequest&&res.status===401){const token=await obtain(true);if(token){headers.set('authorization','Bearer '+token);res=await fetch(`/api/${path}`,{...options,headers});}}
+ const data=await res.json().catch(()=>({error:'Service indisponible.'}));
+ if(privateRequest&&res.status===401){user=null;accounts=[];draft.players=[];$('account-btn').textContent='Se connecter';}
+ if(!res.ok)throw new Error(data.error||'Service indisponible.');return data;
 }
+function wirePlayerSearch(inputId:string,regionId:string,onChoose:()=>void){attachPlayerSearch($<HTMLInputElement>(inputId),$<HTMLSelectElement>(regionId),()=>accounts.map(a=>({riotId:a.game_name+'#'+a.tag_line,platform:a.platform})),(q,platform,signal)=>api('players/suggest?'+new URLSearchParams({q,platform}),{signal}),()=>onChoose());}
 function page(which:string){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id===`page-${which}`));$('back').hidden=which==='home';window.scrollTo({top:0,behavior:'instant'});}
-function begin(nextMode:string){mode=nextMode;page('draft');$('live-note').hidden=mode!=='live';$('draft-mode').textContent=mode==='live'?'DRAFT EN DIRECT · SAISIE RAPIDE':'DRAFT MANUELLE';if(mode==='live')draft.players=[];renderRows();schedule();if(mode==='live')showLiveLimit();}
+function begin(nextMode:string){mode=nextMode;page('draft');$('live-note').hidden=mode!=='live';$('draft-mode').textContent=mode==='live'?'DRAFT EN DIRECT · SAISIE RAPIDE':'DRAFT MANUELLE';if(mode==='live'){draft.players=[];draft.publicPlayers=[];}renderRows();schedule();if(mode==='live')showLiveLimit();}
 function persist(){
   try{localStorage.setItem('singe:draft:v1',JSON.stringify({...draft,players:[]}));}catch{}
 }
 function savePreferences(){
-  if(!user)return;clearTimeout(preferenceTimer);preferenceTimer=setTimeout(()=>api('profile',{method:'PUT',body:JSON.stringify({metrics:shown,global:globalOn,personal:personalOn,filter:draft.filter,...(myAccountId?{primaryAccountId:myAccountId,myRole}:{})})},true).catch(e=>toast(e.message)),800);
+  if(!user)return;clearTimeout(preferenceTimer);preferenceTimer=setTimeout(()=>api('profile',{method:'PUT',body:JSON.stringify({metrics:shown,global:globalOn,personal:personalOn,filter:draft.filter,...(myAccountId?{primaryAccountId:myAccountId,myRole}:{})})},true).catch(()=>{/* Optional account sync never interrupts public profile lookup. */}),800);
 }
 function statBlock(side:Side,slot:number){
   if(!draft[side][slot]||(!globalOn&&!personalOn))return '';
   const card=analysis?.cards?.[side]?.[slot];
-  const associated=draft.players?.some(p=>p.side===side&&p.slot===slot);
+  const associated=draft.players?.some(p=>p.side===side&&p.slot===slot)||draft.publicPlayers?.some(p=>p.side===side&&p.slot===slot);
   const sources=[...(globalOn?[{s:card?.role,title:'OP.GG · ALL TIERS',personal:false}]:[]),...(personalOn&&associated?[{s:card?.personal.champion,title:'JOUEUR · TOUS POSTES',personal:true}]:[])];
   return `<div class="two-src">${sources.map(({s,title,personal})=>`<div class="line-src"><div class="line-heading"><span class="src-label ${personal?'mine':''}">${title}</span><span class="src-n">${s?.n==null?'Volume non fourni':format(s.n,0)+' matchs'}</span></div><div class="metrics">${shown.map(k=>{
     const st=k==='vs'?(personal?card?.personal.matchup:card?.matchup):s;
     const insufficient=!personal&&st?.n!=null&&st.n<30;
-    return `<span class="metric" title="${esc(metrics[k])} · n=${st?.n??'non fourni'} · IC 95 % ${interval(st)}${insufficient?' · échantillon insuffisant':''}"><strong>${insufficient?'—':value(st,k==='vs'?'wr':k)}</strong><small>${insufficient?'Échantillon < 30':esc(metrics[k])}</small></span>`;
+    return `<span class="metric" title="${esc(metrics[k])} · n=${st?.n??'non fourni'} · IC 95 % ${interval(st)}${insufficient?' · échantillon insuffisant':''}"><strong>${insufficient?'—':value(st,k==='vs'?'wr':k)}</strong><small>${insufficient?'Échantillon < 30':esc(personal&&k==='wr'?'WR avec ce champion':metrics[k])}</small></span>`;
   }).join('')}</div></div>`).join('')}</div>`;
 }
 function slotHtml(side:Side,i:number){
-  const id=draft[side][i],right=side==='red',selected=draft.selected[side].includes(i),player=draft.players?.find(p=>p.side===side&&p.slot===i),account=accounts.find(a=>a.id===player?.accountId);
+  const id=draft[side][i],right=side==='red',selected=draft.selected[side].includes(i),player=draft.players?.find(p=>p.side===side&&p.slot===i),account=accounts.find(a=>a.id===player?.accountId),publicPlayer=draft.publicPlayers?.find(p=>p.side===side&&p.slot===i);
   const toggle=id?'<span class="edge-spacer"></span>':`<label class="edge-check"><input class="slot-analyze" type="checkbox" data-side="${side}" data-slot="${i}" aria-label="Optimiser ${ROLES[i]} ${right?'adverse':'allié'}" ${selected?'checked':''}></label>`;
-  const card=`<div class="pick ${side} ${id?'locked':'empty'} ${selected?'selected':''}" data-side="${side}" data-slot="${i}">${id?`<button class="champ-thumb champ-details" data-side="${side}" data-slot="${i}" aria-label="Statistiques de ${esc(name(id))}">${photo(id)}</button>`:`<div class="champ-thumb empty">${photo(null)}</div>`}<div class="pick-main"><div class="slot-top"><div class="who"><input type="text" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="suggest-${side}-${i}" aria-expanded="false" aria-label="${right?'Adversaires':'Alliés'} ${ROLES[i]}, champion" placeholder="Chercher…" value="${id?esc(name(id)):''}" data-combo="true"></div></div>${mode!=='live'?`<button class="player-link" data-player-side="${side}" data-player-slot="${i}">${account?esc(account.game_name+'#'+account.tag_line):'＋ Joueur visible (facultatif)'}</button>`:''}<div data-stat>${statBlock(side,i)}</div></div><div class="suggest" id="suggest-${side}-${i}" role="listbox" hidden></div></div>`;
+  const card=`<div class="pick ${side} ${id?'locked':'empty'} ${selected?'selected':''}" data-side="${side}" data-slot="${i}">${id?`<button class="champ-thumb champ-details" data-side="${side}" data-slot="${i}" aria-label="Statistiques de ${esc(name(id))}">${photo(id)}</button>`:`<div class="champ-thumb empty">${photo(null)}</div>`}<div class="pick-main"><div class="slot-top"><div class="who"><input type="text" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="suggest-${side}-${i}" aria-expanded="false" aria-label="${right?'Adversaires':'Alliés'} ${ROLES[i]}, champion" placeholder="Chercher…" value="${id?esc(name(id)):''}" data-combo="true"></div></div>${mode!=='live'?`<button class="player-link" data-player-side="${side}" data-player-slot="${i}">${publicPlayer?esc(publicPlayer.riotId):account?esc(account.game_name+'#'+account.tag_line):'＋ Joueur visible (facultatif)'}</button>`:''}<div data-stat>${statBlock(side,i)}</div></div><div class="suggest" id="suggest-${side}-${i}" role="listbox" hidden></div></div>`;
   return `<div class="slot-wrap ${side}">${right?card+toggle:toggle+card}</div>`;
 }
 function renderRows(){
@@ -135,8 +140,8 @@ function schedule(){
   timer=setTimeout(async()=>{
     controller=new AbortController();
     try{
-      const result=await api('analyze',{method:'POST',body:JSON.stringify(draft),signal:controller.signal});
-      if(current!==sequence)return;analysis=result;updateStats();renderResults();$('auto-status').textContent='● À jour';
+      const result=await api('analyze',{method:'POST',body:JSON.stringify(draft),signal:controller.signal},!!draft.players?.length);
+      if(current!==sequence)return;analysis=result;updateStats();renderResults();$('auto-status').textContent='● À jour';if(result.missingPublicProfiles?.length)void refreshPublicPlayers();
     }catch(e){if(current!==sequence||(e as Error).name==='AbortError')return;$('auto-status').textContent='○ Hors ligne';$('data-status').textContent=(e as Error).message;}
   },300);
 }
@@ -161,7 +166,7 @@ function renderBans(){$('ban-chips').innerHTML=draft.bans.map(id=>`<button class
 $('add-ban').onclick=()=>{const input=$<HTMLInputElement>('ban-input'),c=champions.find(c=>norm(c.name)===norm(input.value)||norm(c.id)===norm(input.value));if(!c){toast('Choisis un champion du catalogue.');return;}if(draft.bans.length>=10||[...draft.blue,...draft.red,...draft.bans].includes(c.id)){toast('Champion déjà choisi ou dix bans atteints.');return;}draft.bans.push(c.id);input.value='';renderBans();changed();};
 $('ban-chips').onclick=e=>{const b=(e.target as HTMLElement).closest<HTMLElement>('[data-ban]');if(b){draft.bans=draft.bans.filter(c=>c!==b.dataset.ban);renderBans();changed();}};
 
-async function loadProfile(){const profile=await api('profile',{},true);accounts=profile.accounts;const p=profile.preferences;if(p.metrics)shown=p.metrics;if(typeof p.global==='boolean')globalOn=p.global;if(typeof p.personal==='boolean')personalOn=p.personal;if(p.filter)draft.filter=p.filter;if(!p.primaryAccountId||!accounts.some(a=>a.id===p.primaryAccountId)){personalOn=false;myAccountId='';}if(p.primaryAccountId&&accounts.some(a=>a.id===p.primaryAccountId)){myAccountId=p.primaryAccountId;myRole=p.myRole??1;if(personalOn)associateMe();}$<HTMLInputElement>('stat-global').checked=globalOn;$<HTMLInputElement>('stat-mine').checked=personalOn;renderMetricOptions();syncFilters();renderRows();schedule();}
+async function loadProfile(){const profile=await api('profile',{},true);accounts=profile.accounts;const p=profile.preferences;if(p.metrics)shown=p.metrics;if(typeof p.global==='boolean')globalOn=p.global;if(!myPublicIdentity&&typeof p.personal==='boolean')personalOn=p.personal;if(p.filter)draft.filter=p.filter;if(!myPublicIdentity&&(!p.primaryAccountId||!accounts.some(a=>a.id===p.primaryAccountId))){personalOn=false;myAccountId='';}if(!myPublicIdentity&&p.primaryAccountId&&accounts.some(a=>a.id===p.primaryAccountId)){myAccountId=p.primaryAccountId;myRole=p.myRole??1;if(personalOn)associateMe();}$<HTMLInputElement>('stat-global').checked=globalOn;$<HTMLInputElement>('stat-mine').checked=personalOn;renderMetricOptions();syncFilters();renderRows();schedule();}
 async function showAccount(){
   $<HTMLDialogElement>('account-dialog').showModal();
   if(!user){$('account-content').innerHTML='<p class="inline-note">Connecte-toi pour conserver tes comptes Riot, tes préférences et tes drafts.</p><button id="google-login" class="mainbtn">Continuer avec Google</button><p class="inline-note">La connexion Google est gérée par Neon Auth. L’association d’un Riot ID reste une déclaration, distincte d’une autorisation Riot Sign On.</p>';
@@ -172,6 +177,7 @@ async function showAccount(){
     await loadProfile();const history=await api('drafts',{},true);
     $('account-content').innerHTML=`<p class="inline-note">${esc(user.name)} · Ton espace privé</p><button id="logout" class="smallbtn">Se déconnecter</button><h4 class="account-heading">Comptes Riot</h4><p class="inline-note">Associe ton compte ou un joueur dont l’identité est publiquement visible. Cette déclaration ne prouve pas que tu possèdes le compte. Aucun joueur masqué ne peut être recherché via la draft en direct.</p>${accounts.map(a=>`<div class="account-item"><div><strong>${esc(a.game_name+'#'+a.tag_line)}</strong><small>${a.platform} · ID déclaré, RSO non autorisé</small><small>${a.rank_data?.length?a.rank_data.map((r:any)=>esc(r.tier+' '+r.rank+' · '+r.leaguePoints+' LP')).join(' / '):'Rang non fourni'} · ${a.refreshed_at?'Actualisé le '+new Date(a.refreshed_at).toLocaleDateString('fr-FR'):'Actualisation OP.GG en attente'}</small></div><div class="account-actions"><button class="smallbtn" data-account-stats="${a.id}">Stats</button><button class="smallbtn" data-refresh="${a.id}">Actualiser</button><button class="minorbtn" data-remove-account="${a.id}">Retirer</button></div></div>`).join('')}<form class="account-form" id="riot-form"><label>Riot ID<input id="riot-id" placeholder="Pseudo#EUW" required maxlength="60"></label><label>Région<select id="riot-platform">${['EUW1','EUN1','NA1','KR','BR1','JP1','TR1','RU','LA1','LA2','OC1','PH2','SG2','TH2','TW2','VN2'].map(p=>`<option>${p}</option>`).join('')}</select></label><label class="checklabel"><input type="checkbox" required> Je confirme que cette identité est visible ou qu’il s’agit de mon compte. Elle n’est pas masquée par Riot.</label><button class="smallbtn">Associer le Riot ID</button></form><div id="profile-stats" class="profile-stats"></div><h4 class="account-heading">Tes drafts</h4>${history.length?history.map((d:any)=>`<div class="history-item"><div><strong>${esc(d.name)}</strong><small>${new Date(d.updated_at).toLocaleString('fr-FR')} · ${d.state.blue.filter(Boolean).length} alliés</small></div><div class="account-actions"><button class="smallbtn" data-load-draft="${d.id}">Ouvrir</button><button class="minorbtn" data-delete-draft="${d.id}">Supprimer</button></div></div>`).join(''):'<p class="inline-note">Enregistre une draft pour la retrouver ici.</p>'}<details><summary>Mes données</summary><p class="inline-note">Supprime les profils, comptes associés, préférences et drafts de Singe Drafting. Ton compte Google et la session Neon Auth sont conservés.</p><button class="minorbtn" id="delete-profile">Effacer mes données Singe Drafting</button></details>`;
     $('riot-form').onsubmit=async e=>{e.preventDefault();const button=$('riot-form').querySelector('button')!;button.disabled=true;try{await api('accounts',{method:'POST',body:JSON.stringify({riotId:$<HTMLInputElement>('riot-id').value,platform:$<HTMLSelectElement>('riot-platform').value,visibleIdentity:true})},true);toast('Compte associé avec ses agrégats OP.GG.');await showAccountRefresh();}catch(e){toast((e as Error).message);}finally{button.disabled=false;}};
+    wirePlayerSearch('riot-id','riot-platform',()=>$<HTMLFormElement>('riot-form').requestSubmit());
     $('logout').onclick=async()=>{try{const result=await auth?.signOut();if(result?.error)throw new Error(result.error.message);user=null;accounts=[];myAccountId='';draft.players=[];personalOn=false;$('personal-banner').hidden=true;shown=['wr','vs','n'];globalOn=true;$<HTMLInputElement>('stat-mine').checked=false;$<HTMLInputElement>('stat-global').checked=true;$('account-btn').textContent='Se connecter';$<HTMLDialogElement>('account-dialog').close();renderMetricOptions();renderRows();changed();}catch{toast('Déconnexion indisponible. Réessaie.');}};
     $('delete-profile').onclick=async()=>{if(!confirm('Effacer tes données Singe Drafting ? Cette suppression est définitive.'))return;await api('profile',{method:'DELETE'},true);accounts=[];draft.players=[];toast('Données Singe Drafting effacées.');await showAccountRefresh();};
     $('account-content').onclick=async e=>{
@@ -184,20 +190,21 @@ async function showAccount(){
         if(target.dataset.deleteDraft){await api(`drafts/${target.dataset.deleteDraft}`,{method:'DELETE'},true);await showAccountRefresh();}
       }catch(e){toast((e as Error).message);}
     };
-  }catch(e){$('account-content').textContent=(e as Error).message;}
+  }catch(e){if(!user){void showAccount();toast((e as Error).message);}else $('account-content').textContent=(e as Error).message;}
 }
 async function showAccountRefresh(){$<HTMLDialogElement>('account-dialog').close();await showAccount();}
-function selectPlayer(side:Side,slot:number){
-  if(!user){void showAccount();return;}
-  $<HTMLDialogElement>('account-dialog').showModal();$('account-content').onclick=null;
-  $('account-content').innerHTML=`<p class="inline-note">${ROLES[slot]} · ${side==='blue'?'Allié':'Adversaire'}. Utilise uniquement une identité visible. Compte déclaré, sans vérification RSO.</p><div class="account-form"><label>Compte<select id="slot-account"><option value="">Anonyme / données générales uniquement</option>${accounts.map(a=>`<option value="${a.id}">${esc(a.game_name+'#'+a.tag_line)} · ${a.platform}</option>`).join('')}</select></label><button class="smallbtn" id="apply-account">Associer au poste</button><button class="minorbtn" id="manage-accounts">Gérer mes comptes Riot</button></div>`;
-  $<HTMLSelectElement>('slot-account').value=draft.players?.find(p=>p.side===side&&p.slot===slot)?.accountId||'';
-  $('apply-account').onclick=()=>{draft.players=draft.players?.filter(p=>p.side!==side||p.slot!==slot)||[];const id=$<HTMLSelectElement>('slot-account').value;if(id)draft.players.push({side,slot,accountId:id});$<HTMLDialogElement>('account-dialog').close();renderRows();changed();};
-  $('manage-accounts').onclick=()=>void showAccountRefresh();
-}
+function selectPlayer(side:Side,slot:number){showIdentitySetup('personal',{side,slot});}
 function associateMe(){
-  draft.players=(draft.players||[]).filter(p=>!(p.side==='blue'&&p.slot===myRole)&&p.accountId!==myAccountId);
-  if(myAccountId)draft.players.push({side:'blue',slot:myRole,accountId:myAccountId});
+ draft.players=(draft.players||[]).filter(p=>!(p.side==='blue'&&p.slot===myRole)&&p.accountId!==myAccountId);
+ draft.publicPlayers=(draft.publicPlayers||[]).filter(p=>!(p.side==='blue'&&p.slot===myRole));
+ if(myPublicIdentity)draft.publicPlayers.push({side:'blue',slot:myRole,...myPublicIdentity});
+ else if(myAccountId)draft.players.push({side:'blue',slot:myRole,accountId:myAccountId});
+}
+async function refreshPublicPlayers(){
+ if(refreshingPublic||!personalOn||Date.now()<publicRetryAt)return;refreshingPublic=true;
+ try{for(const p of draft.publicPlayers||[])await api('players/lookup',{method:'POST',body:JSON.stringify({riotId:p.riotId,platform:p.platform})});schedule();}
+ catch{publicRetryAt=Date.now()+60000;if(myPublicIdentity)$('personal-banner').textContent='OP.GG ne répond pas pour le profil choisi. Les statistiques générales restent disponibles. Réessaie en cliquant sur Mes stats LoL.';}
+ finally{refreshingPublic=false;}
 }
 async function updateCoverage(){
  try{const c=await api('coverage?queue='+draft.filter.queue);$('coverage-banner').innerHTML=`<a href="https://op.gg/lol/champions" target="_blank" rel="noopener">Statistiques OP.GG</a> · All Tiers · ${c.context?.mode==='flex'?'Flex':'Solo / Duo'} · ${Number(c.completed)||0}/${Number(c.total)||0} champions · ${Number(c.matchups)||0} matchups · ${Number(c.synergies)||0} duos. Couverture mondiale non vérifiable : le MCP ne précise pas les régions.${c.stale?' Derniers agrégats conservés en attendant OP.GG.':''}`;}catch{$('coverage-banner').textContent='OP.GG indisponible. Aucun chiffre fictif ni ancien agrégat Riot utilisé.';}
@@ -205,38 +212,29 @@ async function updateCoverage(){
 function showLiveLimit(){
  $('identity-title').textContent='Draft en direct';$('identity-content').innerHTML='<p class="inline-note">Le MCP officiel OP.GG ne fournit ni la partie en cours ni la sélection des champions du client. La synchronisation automatique est indisponible avec cette source.</p><p class="inline-note">Saisis rapidement les champions pendant la draft. La recherche au clavier et les recommandations automatiques restent disponibles.</p><button class="mainbtn" id="live-manual">Saisir les champions</button>';$<HTMLDialogElement>('identity-dialog').showModal();$('live-manual').onclick=()=>{$<HTMLDialogElement>('identity-dialog').close();document.querySelector<HTMLInputElement>('[data-combo]')?.focus();};
 }
-function showIdentitySetup(purpose:'personal'|'live'){
-  if(purpose==='live'){showLiveLimit();return;}
-  const personal=purpose==='personal',account=accounts.find(a=>a.id===myAccountId)||accounts[0];
-  $('identity-title').textContent=personal?'Tes statistiques LoL':'Chercher ta partie';
-  $('identity-content').innerHTML=`<p class="inline-note">${personal?'Indique ton Riot ID et ton poste pour associer tes propres performances aux recommandations.':'La saisie rapide utilise les agrégats OP.GG.'}</p><form class="account-form" id="identity-form"><label for="setup-riot-id">Riot ID</label><input id="setup-riot-id" placeholder="Pseudo#TAG" required maxlength="60" value="${account?esc(account.game_name+'#'+account.tag_line):''}"><label for="setup-platform">Région</label><select id="setup-platform">${['EUW1','EUN1','NA1','KR','BR1','JP1','TR1','RU','LA1','LA2','OC1','SG2','TW2','VN2'].map(p=>`<option ${p===account?.platform?'selected':''}>${p}</option>`).join('')}</select>${personal?`<label for="setup-role">Ton poste</label><select id="setup-role">${ROLES.map((r,i)=>`<option value="${i}" ${i===myRole?'selected':''}>${r}</option>`).join('')}</select><p class="inline-note">${user?'Le compte sera conservé dans ton espace privé.':'Ton Riot ID sera associé après la connexion Google pour conserver tes données dans ton espace privé.'} Une déclaration de Riot ID ne remplace pas Riot Sign On.</p>`:''}<button class="mainbtn" id="identity-submit">${personal?'Charger mes statistiques':'Rechercher une partie en cours'}</button><p id="identity-status" class="inline-note" role="status"></p></form>`;
-  $<HTMLDialogElement>('identity-dialog').showModal();
-  $('identity-form').onsubmit=async e=>{
-    e.preventDefault();const button=$<HTMLButtonElement>('identity-submit');button.disabled=true;
-    const input={riotId:$<HTMLInputElement>('setup-riot-id').value.trim(),platform:$<HTMLSelectElement>('setup-platform').value,role:personal?Number($<HTMLSelectElement>('setup-role').value):0};
-    try{
-      if(personal){
-        await authReady;
-        if(!user){sessionStorage.setItem('singe:pending-riot',JSON.stringify(input));if(!auth)throw new Error('Connexion Google indisponible. Réessaie dans un instant.');$('identity-status').textContent='Connexion Google, puis association automatique de ce Riot ID…';const result=await auth.signIn.social({provider:'google',callbackURL:location.origin});if(result.error)throw new Error(result.error.message||'Connexion Google indisponible.');return;}
-        $('identity-status').textContent='Chargement des agrégats du profil OP.GG…';await connectPersonal(input);$<HTMLDialogElement>('identity-dialog').close();
-      }else{
-        showLiveLimit();
-      }
-    }catch(e){$('identity-status').textContent=(e as Error).message;}
-    finally{button.disabled=false;}
-  };
+function showIdentitySetup(purpose:'personal'|'live',target?:{side:Side;slot:number}){
+ if(purpose==='live'){showLiveLimit();return;}
+ const current=target?draft.publicPlayers?.find(p=>p.side===target.side&&p.slot===target.slot):myPublicIdentity;
+ const account=accounts.find(a=>a.id===myAccountId),initial=current?.riotId||(account?account.game_name+'#'+account.tag_line:''),platform=current?.platform||account?.platform||'EUW1';
+ $('identity-title').textContent=target?'Profil du joueur visible':'Tes statistiques LoL';
+ $('identity-content').innerHTML=`<p class="inline-note">Choisis un profil récent ou saisis son Riot ID complet. Aucune connexion Google nécessaire.</p><form class="account-form" id="identity-form"><label for="setup-riot-id">Riot ID</label><input id="setup-riot-id" placeholder="Nom#TAG" required maxlength="60" value="${esc(initial)}"><label for="setup-platform">Région</label><select id="setup-platform">${['EUW1','EUN1','NA1','KR','BR1','JP1','TR1','RU','LA1','LA2','OC1','SG2','TW2','VN2','ME1'].map(p=>`<option ${p===platform?'selected':''}>${p}</option>`).join('')}</select><label for="setup-role">${target?'Poste':'Ton poste'}</label><select id="setup-role" ${target?'disabled':''}>${ROLES.map((r,i)=>`<option value="${i}" ${i===(target?.slot??myRole)?'selected':''}>${r}</option>`).join('')}</select><p class="inline-note">Profils publics uniquement. Ces choix restent sur ce navigateur ; Google est facultatif pour enregistrer tes drafts.</p><button class="mainbtn" id="identity-submit">Charger les statistiques</button>${current?'<button type="button" class="minorbtn" id="remove-public-player">Retirer ce profil</button>':''}<p id="identity-status" class="inline-note" role="status"></p></form>`;
+ $<HTMLDialogElement>('identity-dialog').showModal();
+ wirePlayerSearch('setup-riot-id','setup-platform',()=>$<HTMLFormElement>('identity-form').requestSubmit());
+ $('identity-form').onsubmit=async e=>{e.preventDefault();const button=$<HTMLButtonElement>('identity-submit');button.disabled=true;$('identity-status').textContent='Chargement du profil OP.GG…';
+  try{await connectPersonal({riotId:$<HTMLInputElement>('setup-riot-id').value.trim(),platform:$<HTMLSelectElement>('setup-platform').value,role:Number($<HTMLSelectElement>('setup-role').value)},target);$<HTMLDialogElement>('identity-dialog').close();}catch(e){$('identity-status').textContent=(e as Error).message;}finally{button.disabled=false;}
+ };
+ if(current)$('remove-public-player').onclick=()=>{const side=target?.side||'blue',slot=target?.slot??myRole;draft.publicPlayers=draft.publicPlayers?.filter(p=>p.side!==side||p.slot!==slot);if(!target){myPublicIdentity=null;personalOn=false;try{localStorage.removeItem('singe:my-public-player');}catch{}$('personal-banner').hidden=true;$<HTMLInputElement>('stat-mine').checked=false;}$<HTMLDialogElement>('identity-dialog').close();renderRows();changed();};
 }
-async function connectPersonal(input:{riotId:string;platform:string;role:number}){
-  const existing=accounts.find(a=>norm(a.game_name+'#'+a.tag_line)===norm(input.riotId)&&a.platform===input.platform);
-  const account=existing||await api('accounts',{method:'POST',body:JSON.stringify({...input,visibleIdentity:true})},true);
-  myAccountId=account.id;myRole=input.role;personalOn=true;associateMe();
-  $<HTMLInputElement>('stat-mine').checked=true;$('personal-banner').hidden=false;
-  $('personal-banner').textContent=`Mes statistiques : ${input.riotId} · ${input.platform} · ${ROLES[myRole]}. Chargement des agrégats OP.GG…`;
-  await api('profile',{method:'PUT',body:JSON.stringify({metrics:shown,global:globalOn,personal:true,filter:draft.filter,primaryAccountId:myAccountId,myRole})},true);
-  const profile=await api('profile',{},true);accounts=profile.accounts;renderRows();changed();
-  try{const sync=await api(`accounts/${myAccountId}/sync`,{method:'POST'},true);$('personal-banner').textContent=`Mes statistiques : ${input.riotId} · ${ROLES[myRole]} · ${sync.sample??"Volume non fourni"} parties agrégées OP.GG (saison ${sync.context?.season??"non précisée"}, tous postes).`;changed();}
-  catch(e){$('personal-banner').textContent=`Compte ${input.riotId} associé. ${(e as Error).message}`;}
-  savePreferences();
+async function connectPersonal(input:{riotId:string;platform:string;role:number},target?:{side:Side;slot:number}){
+ const result=await api('players/lookup',{method:'POST',body:JSON.stringify({riotId:input.riotId,platform:input.platform})}),identity=result.identity as PlayerIdentity;
+ rememberPlayer(identity);personalOn=true;
+ const side=target?.side||'blue',slot=target?.slot??input.role;
+ draft.players=(draft.players||[]).filter(p=>p.side!==side||p.slot!==slot);
+ if(!target){const oldRole=myRole;if(myPublicIdentity)draft.publicPlayers=draft.publicPlayers?.filter(p=>p.side!=='blue'||p.slot!==oldRole);myPublicIdentity=identity;myAccountId='';myRole=input.role;try{localStorage.setItem('singe:my-public-player',JSON.stringify({...identity,role:myRole}));}catch{}}
+ draft.publicPlayers=[...(draft.publicPlayers||[]).filter(p=>p.side!==side||p.slot!==slot),{side,slot,...identity}];
+ $<HTMLInputElement>('stat-mine').checked=true;$('personal-banner').hidden=false;
+ $('personal-banner').textContent=`${identity.riotId} · ${identity.platform} · ${ROLES[slot]} · OP.GG : ${result.profile.overall.n??'volume non fourni'} parties (saison ${result.profile.context.season??'non précisée'}, tous postes).`;
+ renderRows();changed();savePreferences();
 }
 $('close-identity').onclick=()=>{$<HTMLDialogElement>('identity-dialog').close();$<HTMLInputElement>('stat-mine').checked=personalOn;};
 $('identity-dialog').addEventListener('cancel',()=>{$<HTMLInputElement>('stat-mine').checked=personalOn;});
@@ -253,21 +251,22 @@ $('account-btn').onclick=()=>void showAccount();$('close-account').onclick=()=>$
 for(const id of ['account-dialog','champ-dialog'])$(id).addEventListener('click',e=>{if(e.target===$(id))$<HTMLDialogElement>(id).close();});
 $('clear-draft').onclick=()=>{draft.blue=Array(5).fill(null);draft.red=Array(5).fill(null);draft.selected={blue:[0,1,2,3,4],red:[0,1,2,3,4]};renderRows();changed();};
 $('fill-example').onclick=()=>{draft.blue=['Darius','Fiddlesticks','Ahri',null,null];draft.red=['Garen','Viego','Yasuo','Caitlyn','Nautilus'];draft.selected={blue:[3,4],red:[]};draft.bans=[];renderBans();renderRows();changed();toast('Exemple de sélections uniquement. Les statistiques viennent des agrégats OP.GG.');};
-$('stat-global').onchange=()=>{globalOn=$<HTMLInputElement>('stat-global').checked;updateStats();savePreferences();};$('stat-mine').onchange=async()=>{if($<HTMLInputElement>('stat-mine').checked){await authReady;showIdentitySetup('personal');}else{personalOn=false;$('personal-banner').hidden=true;updateStats();savePreferences();}};
+$('stat-global').onchange=()=>{globalOn=$<HTMLInputElement>('stat-global').checked;updateStats();savePreferences();};$('stat-mine').onchange=async()=>{if($<HTMLInputElement>('stat-mine').checked){showIdentitySetup('personal');}else{personalOn=false;$('personal-banner').hidden=true;updateStats();savePreferences();}};
 $('config-btn').onclick=()=>{const p=$('config-panel');p.hidden=!p.hidden;$('config-btn').setAttribute('aria-expanded',String(!p.hidden));};
 async function init(){
   authReady=initializeAuth();
   try{const saved=JSON.parse(localStorage.getItem('singe:draft:v1')||'null');if(saved?.blue?.length===5&&saved?.red?.length===5&&saved.filter&&saved.selected){draft={...saved,players:[]};}}catch{}
   syncFilters();renderRows();renderBans();renderMetricOptions();
   const cat=await fetch('/data/catalog.json').then(r=>r.ok?r.json():null).catch(()=>null);if(cat?.champions){champions=cat.champions;$('champion-list').innerHTML=champions.map(c=>`<option value="${esc(c.name)}">`).join('');renderRows();}
+  try{const saved=JSON.parse(localStorage.getItem('singe:my-public-player')||'null');if(saved?.riotId&&saved?.platform){myPublicIdentity={riotId:saved.riotId,platform:saved.platform};myRole=saved.role??1;personalOn=true;associateMe();$<HTMLInputElement>('stat-mine').checked=true;$('personal-banner').hidden=false;$('personal-banner').textContent='Profil public : '+saved.riotId;void refreshPublicPlayers();}}catch{}
   await authReady;
-  try{const pending=JSON.parse(sessionStorage.getItem('singe:pending-riot')||'null');if(pending&&user){sessionStorage.removeItem('singe:pending-riot');begin('manual');await connectPersonal(pending);}}catch(e){toast((e as Error).message);}
+  try{const pending=JSON.parse(sessionStorage.getItem('singe:pending-riot')||'null');if(pending){sessionStorage.removeItem('singe:pending-riot');begin('manual');await connectPersonal(pending);}}catch(e){toast((e as Error).message);}
   void updateCoverage();
   if(location.search.includes('error='))toast('La connexion Google n’a pas abouti. Réessaie depuis ton espace.');
   schedule();
 }
 async function initializeAuth(){
-  try{const config=await api('config');if(config.authUrl){auth=makeAuth(config.authUrl);const session=await auth.getSession();if(session.error)throw new Error(session.error.message||'Session indisponible.');if(session.data?.user){user=session.data.user as {id:string;name:string};$('account-btn').textContent=user.name||'Mon espace';await loadProfile();}}}catch{ /* Anonymous drafting remains available. */ }
+  try{const config=await api('config');if(config.authUrl){auth=makeAuth(config.authUrl);const session=await auth.getSession();if(session.error)throw new Error(session.error.message||'Session indisponible.');if(session.data?.user){user=session.data.user as {id:string;name:string};$('account-btn').textContent=user.name||'Mon espace';try{await loadProfile();}catch{ /* Public profile lookup does not depend on the private account. */ }}}}catch{ /* Anonymous drafting remains available. */ }
 }
 void init();
-setInterval(()=>{if(!document.hidden&&$('page-draft').classList.contains('on')&&!openPick)schedule();},180000);
+setInterval(()=>{if(!document.hidden&&$('page-draft').classList.contains('on')&&!openPick){if(personalOn&&draft.publicPlayers?.length)void refreshPublicPlayers();else schedule();}},180000);

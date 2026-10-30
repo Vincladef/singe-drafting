@@ -13,3 +13,8 @@ test('Oversized bodies and malformed JSON rejected',async()=>{
   await assert.rejects(jsonBody(new Request('https://example.com',{method:'POST',body:'x'.repeat(40000)})),(e:any)=>e.status===413);
   await assert.rejects(jsonBody(new Request('https://example.com',{method:'POST',body:'{'})),(e:any)=>e.status===400);
 });
+
+test('Public player entry points accept anonymous callers without exposing private profiles',async()=>{
+ const bad=await api(new Request('https://singe-drafting.netlify.app/api/players/lookup',{method:'POST',headers:{authorization:'Bearer expired'},body:JSON.stringify({riotId:'MissingTag',platform:'EUW1'})}),{} as any);assert.equal(bad.status,400);
+ const suggestions=await api(new Request('https://singe-drafting.netlify.app/api/players/suggest?q=Vis&platform=EUW1'),{} as any);assert.equal(suggestions.status,200);assert.deepEqual((await suggestions.json()).suggestions,[]);
+});

@@ -38,3 +38,13 @@ test('Personal Riot ID entry and honest live mode are accessible',async({page})=
   await expect(page.locator('#setup-riot-id')).toBeVisible();await expect(page.locator('#setup-role')).toBeVisible();await page.locator('#close-identity').click();
   await page.locator('#back').click();await page.locator('#begin-live').click();await expect(page.locator('#identity-content')).toContainText('Le MCP officiel OP.GG');await expect(page.locator('#live-manual')).toBeVisible();
 });
+
+test('Public OP.GG profile loads without Google and appears in the recent-name dropdown',async({page,request})=>{
+ test.setTimeout(60000);
+ const response=await request.post('/api/players/lookup',{data:{riotId:'Faker#KR  1',platform:'KR'}});expect(response.status()).toBe(200);const profile=await response.json();expect(profile.profile.overall.n).toBeGreaterThan(0);
+ await page.goto('/');await page.locator('#begin-manual').click();await page.locator('#stat-mine').check();await page.locator('#setup-platform').selectOption('KR');await page.locator('#setup-riot-id').fill(profile.identity.riotId);await page.locator('#setup-role').selectOption('3');await page.locator('#identity-submit').click();await expect(page.locator('#identity-dialog')).not.toBeVisible({timeout:30000});
+ await expect(page.locator('#personal-banner')).toContainText(profile.identity.riotId);await expect(page.locator('#google-login')).toHaveCount(0);
+ const input=page.getByRole('combobox',{name:'Alliés ADC, champion'});await input.fill('KogMaw');await input.press('Enter');await expect(page.locator('#auto-status')).toContainText('À jour',{timeout:30000});
+ await expect(page.locator('.pick.blue[data-slot="3"] .src-label.mine')).toBeVisible();
+ await page.locator('#stat-mine').uncheck();await page.locator('#stat-mine').check();await page.locator('#setup-riot-id').fill('Fak');await expect(page.locator('.player-results [role=option]')).toHaveCount(1);await page.locator('.player-results [role=option]').click();await expect(page.locator('#identity-dialog')).not.toBeVisible();
+});

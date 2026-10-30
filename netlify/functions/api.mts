@@ -2,9 +2,9 @@ import type { Config, Context } from '@netlify/functions';
 import { z } from 'zod';
 import { db,cached,env,hash,quota } from '../../server/db.ts';
 import { HttpError,jsonBody,sameOrigin,userId } from '../../server/auth.ts';
-import { draftSchema,preferencesSchema } from '../../server/validation.ts';
+import { draftSchema,preferencesSchema,publicIdentitySchema } from '../../server/validation.ts';
 import { analyze,catalog } from '../../server/service.ts';
-import { PLATFORMS,parseRiotId,playerProfile } from '../../server/opgg-player.ts';
+import { PLATFORMS,parseRiotId,playerProfile,publicProfile,suggestPublicProfile } from '../../server/opgg-player.ts';
 import { snapshot } from '../../server/opgg-store.ts';
 import { OpggError } from '../../server/opgg-client.ts';
 import { ask } from '../../server/ai.ts';
@@ -33,6 +33,17 @@ export default async (req:Request,context:Context)=>{
     if(path==='coverage'&&req.method==='GET'){
       const data=await snapshot(new URL(req.url).searchParams.get('queue')==='440'?'flex':'ranked');
       return json({source:'OP.GG MCP',context:data.context,completed:data.completed.length,total:data.champions.length,matchups:Object.keys(data.matchups).length,synergies:Object.keys(data.synergies).length,stale:Date.now()-Date.parse(data.context.fetchedAt)>21600000});
+    }
+    if(path==='players/suggest'&&req.method==='GET'){
+      const params=new URL(req.url).searchParams,input=z.object({q:z.string().trim().min(2).max(60),platform:z.enum(Object.keys(PLATFORMS) as [string,...string[]])}).parse({q:params.get('q'),platform:params.get('platform')});
+      if(!input.q.includes('#')||input.q.endsWith('#'))return json({suggestions:[],requiresTag:true,scope:'recent-and-exact'});
+      if(!await quota(`public-suggest:${hash(context.ip||'unknown')}`,30,600))throw new HttpError(429,'Trop de recherches rapprochées. Termine le Riot ID pour charger directement le profil.');
+      return json(await suggestPublicProfile(input.q,input.platform));
+    }
+    if(path==='players/lookup'&&req.method==='POST'){
+      const identity=publicIdentitySchema.parse(await jsonBody(req));
+      if(!await quota(`public-profile:${hash(context.ip||'unknown')}`,30,600))throw new HttpError(429,'Trop de recherches rapprochées. Réessaie dans quelques minutes.');
+      return json(await publicProfile(identity,(await catalog()).champions));
     }
     const user=(await userId(req))!;
     await db()`insert into drafting.profiles(user_id) values(${user}) on conflict do nothing`;

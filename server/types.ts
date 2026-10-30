@@ -17,6 +17,7 @@ export interface Draft {
   blue:(string|null)[]; red:(string|null)[];
   selected:{blue:number[];red:number[]}; bans:string[];
   players?:{side:Side;slot:number;accountId:string}[];
+  publicPlayers?:{side:Side;slot:number;riotId:string;platform:string}[];
   filter:Filter;
 }
 export interface Stat {
