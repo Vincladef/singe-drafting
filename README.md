@@ -46,7 +46,7 @@ La vraie photographie CC BY 2.0 et les portraits officiels sont téléchargés d
 
 `migrations/001_initial.sql` contient profils, comptes, champions, patchs, matchs, participants, timelines, drafts, jobs, caches d’agrégats, quotas, provenance, modèles et prédictions. Les agrégats sont dérivés des matchs normalisés et mis en cache ; il n’existe pas de tables dupliquées pour chaque combinaison possible.
 
-La tâche `refresh` collecte progressivement toutes les cinq minutes avec verrous de jobs, budgets partagés et respect de Retry-After. Après publication, `bootstrap` complète le corpus récent jusqu’à 180 matchs, avec une durée maximale de huit minutes et les mêmes quotas. Les horaires Netlify sont en UTC. La migration `002` conserve l’horodatage effectif des frames et accepte un écart de cinq secondes autour des minutes cibles.
+La tâche `refresh` déclenche chaque minute un traitement de fond signé, protégé par un verrou global, qui collecte des lots pendant 45 secondes avec verrous de jobs, budgets partagés et respect de Retry-After. La collecte régulière n’est pas arrêtée à un objectif de 180 matchs. Son budget de fond est limité à 60 appels / 120 secondes et 20 000 appels / jour ; le budget global de 80 appels / 120 secondes réserve une marge pour les recherches interactives. Les horaires Netlify sont en UTC. La migration `002` conserve l’horodatage effectif des frames et accepte un écart de cinq secondes autour des minutes cibles.
 
 ## Données et limites
 
@@ -56,7 +56,7 @@ Voir [sources et méthode](public/sources.html), [confidentialité](public/priva
 - Le corpus est un échantillon de convenance de comptes déclarés et de pages du classement. Sa couverture augmente progressivement ; elle n’est pas représentative de tous les joueurs.
 - Match-V5 ne fournit pas le rang historique. Le filtre de rang exige le rang actuel documenté des dix participants et peut renvoyer zéro match.
 - L’identification Riot ID est une déclaration, pas RSO. Aucune recherche de joueur n’est proposée dans le mode direct. Aucun historique de noms ou de partie personnalisée n’est collecté.
-- Les API locales du client ne permettent pas une synchronisation automatique depuis un navigateur sans composant local. Le mode direct est explicitement à saisie manuelle.
+- Les API locales du client ne permettent pas une synchronisation automatique depuis un navigateur sans composant local. La sélection des champions reste manuelle ; le mode Partie en direct interroge Spectator-V5 pour une partie commencée après saisie du Riot ID dans le site.
 - LoLalytics interdit la réutilisation de son API par des tiers. Aucun scraping ni agrégat tiers sans droits vérifiés n’est utilisé.
 - Une clé Riot techniquement valide ne prouve pas l’approbation du produit public. Son enregistrement et ses autorisations doivent être confirmés dans le portail Riot ; RSO nécessite ses propres droits.
 - Quotas IA : 20 appels/utilisateur/heure, 200/jour au total, cache privé d’une heure, sortie limitée à 600 tokens. Le moteur statistique fonctionne sans OpenAI.
@@ -68,3 +68,5 @@ Voir [sources et méthode](public/sources.html), [confidentialité](public/priva
 `/api/health` rapporte des états non sensibles : PostgreSQL, nombre de matchs, accès Riot, disponibilité OpenAI et modèle. `/data/build-status.json` décrit le build et sa collecte initiale. Aucune erreur brute contenant des secrets n’est renvoyée ou journalisée. Les erreurs Riot 401/403 imposent de vérifier la clé dans Netlify ; les 429 déclenchent un délai partagé.
 
 Une connexion Google réelle et les actions sur un compte personnel nécessitent leur titulaire. Les tests ne créent pas de faux comptes Google et n’accèdent jamais aux données d’autres utilisateurs.
+
+Les agrégats de champions utilisent maintenant toute la cohorte collectée via SQL, sans plafond de 5 000 matchs. La cohorte des interactions reste bornée ; les données personnelles sont interrogées séparément. Le corpus local n’est jamais présenté comme l’ensemble des parties mondiales. Aucune source agrégée tierce avec droits de réutilisation n’est actuellement connectée.

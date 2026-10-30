@@ -34,12 +34,12 @@ export async function importMatch(id:string,platform:string,catalog:Champion[]){
   const sql=db();const existing=await sql`select timeline_status from drafting.matches where id=${id}`;
   if(existing[0]?.timeline_status==='complete')return false;
   const raw=await riot(routing(platform),`/lol/match/v5/matches/${encodeURIComponent(id)}`,0);
-  let timeline:any;
-  try{timeline=await riot(routing(platform),`/lol/match/v5/matches/${encodeURIComponent(id)}/timeline`,0);}catch(e){if(e instanceof RiotError&&[401,403,429].includes(e.status))throw e;}
+  let timeline:any,timelineStatus='pending';
+  try{timeline=await riot(routing(platform),`/lol/match/v5/matches/${encodeURIComponent(id)}/timeline`,0);timelineStatus='complete';}catch(e){if(e instanceof RiotError&&[401,403,429].includes(e.status))throw e;if(e instanceof RiotError&&e.status===404)timelineStatus='unavailable';}
   const game=normalizeMatch(raw,platform,catalog,timeline);if(!game)return false;
   if(timeline)await status('timeline','reachable',{frames:timeline.info?.frames?.length||0,firstTimes:(timeline.info?.frames||[]).slice(0,3).map((f:any)=>f.timestamp),sampled15:frameAt(timeline.info?.frames,15)?.timestamp??null});
   const queries=[sql`insert into drafting.matches(id,patch,platform,queue,started_at,duration,bans,timeline_status)
-    values(${game.id},${game.patch},${game.platform},${game.queue},${new Date(game.started).toISOString()},${game.duration},${JSON.stringify(game.bans)}::jsonb,${timeline?'complete':'pending'})
+    values(${game.id},${game.patch},${game.platform},${game.queue},${new Date(game.started).toISOString()},${game.duration},${JSON.stringify(game.bans)}::jsonb,${timelineStatus})
     on conflict(id) do update set timeline_status=excluded.timeline_status`];
   for(let i=0;i<game.participants.length;i++){
     const p=game.participants[i];
@@ -73,7 +73,7 @@ export async function collect(limit=4,eager=false){
     catch(e){return {imported:0,reason:e instanceof RiotError?`RIOT_${e.status}`:'TIMELINE_RETRY_FAILED'};}
   }
   const jobRows=await sql`update drafting.jobs set status='running',lease_until=now()+interval '3 minutes',attempts=attempts+1
-    where key=(select key from drafting.jobs where (status='pending' or status='running' and lease_until<now()) and (available_at<=now() or ${eager} and last_error is null) order by updated_at limit 1 for update skip locked) returning *`;
+    where key=(select key from drafting.jobs where (status='pending' or status='running' and lease_until<now()) and (available_at<=now() or ${eager} and last_error is null) order by case when kind='player' then 0 else 1 end,updated_at limit 1 for update skip locked) returning *`;
   let job=jobRows[0];
   let imported=0;
   try{
@@ -91,17 +91,18 @@ export async function collect(limit=4,eager=false){
     const {puuid,platform,accountId}=job.payload;
     const lookback=job.kind==='cohort'?30:90;
     const startTime=Math.floor((Date.now()-lookback*86400000)/1000);
-    const ids=await riot<string[]>(routing(platform),`/lol/match/v5/matches/by-puuid/${encodeURIComponent(puuid)}/ids?start=0&count=30&type=ranked&startTime=${startTime}`,300);
+    const ids=await riot<string[]>(routing(platform),`/lol/match/v5/matches/by-puuid/${encodeURIComponent(puuid)}/ids?start=0&count=100&type=ranked&startTime=${startTime}`,300);
     for(const id of ids.slice(job.cursor,job.cursor+limit)){if(await importMatch(id,platform,catalog))imported++;}
     const cursor=job.cursor+limit,done=cursor>=ids.length;
     await sql`update drafting.jobs set status=${done?'complete':'pending'},cursor=${cursor},lease_until=null,available_at=now()+interval '5 minutes',updated_at=now(),last_error=null where key=${job.key}`;
     if(accountId){const a=await sql`select * from drafting.riot_accounts where id=${accountId}`;if(a[0]&&(!a[0].refreshed_at||Date.now()-new Date(a[0].refreshed_at).getTime()>1800000))await refreshAccount(a[0]);}
-    if(imported)await sql`delete from drafting.cache where key like 'dataset:%'`;
+    if(imported)await sql`delete from drafting.cache where key like 'dataset:%' or key like 'aggregates:%'`;
     await status('collector','ready',{imported,lastRun:new Date().toISOString(),sampling:'ladder and declared accounts; nonrepresentative'});
     return {imported};
   }catch(e){
     const code=e instanceof RiotError?`RIOT_${e.status}`:'IMPORT_FAILED';
-    if(job)await sql`update drafting.jobs set status='pending',last_error=${code},lease_until=null,available_at=now()+interval '15 minutes',updated_at=now() where key=${job.key}`;
+    const delay=e instanceof RiotError&&e.status===429?Math.max(5,e.retryAfter):e instanceof RiotError&&[401,403].includes(e.status)?3600:120;
+    if(job)await sql`update drafting.jobs set status='pending',last_error=${code},lease_until=null,available_at=now()+${delay}*interval '1 second',updated_at=now() where key=${job.key}`;
     await status('collector',code,{imported});return {imported,reason:code};
   }
 }

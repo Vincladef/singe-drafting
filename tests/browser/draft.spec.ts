@@ -6,7 +6,7 @@ test.beforeEach(async({page})=>{
   await page.route('**/api/**',async route=>{
     const path=new URL(route.request().url()).pathname;
     if(path==='/api/analyze'){const draft=route.request().postDataJSON();await route.fulfill({json:new Engine([],fallback).analyze(draft)});return;}
-    await route.fulfill({json:path==='/api/metadata'?{patches:[]}:{authUrl:null}});
+    await route.fulfill({json:path==='/api/metadata'?{patches:[]}:path==='/api/coverage'?{recent:0,total:0}:{authUrl:null}});
   });
   await page.goto('/');
 });
@@ -27,9 +27,27 @@ test('One through five optimization slots and persistence',async({page})=>{
   await page.locator('#fill-example').click();await expect(page.getByRole('combobox',{name:'Alliés JUNGLE, champion'})).toHaveValue('Fiddlesticks');
   await page.reload();await page.locator('#begin-manual').click();await expect(page.getByRole('combobox',{name:'Alliés JUNGLE, champion'})).toHaveValue('Fiddlesticks');
 });
-test('Live mode is manual, identities unavailable, no client simulation',async({page})=>{
-  await page.locator('#begin-live').click();await expect(page.locator('#live-note')).toContainText('Aucune connexion au client');await expect(page.locator('[data-player-side]')).toHaveCount(0);
-  await expect(page.locator('#draft-mode')).toHaveText('DRAFT EN DIRECT · SAISIE MANUELLE');
+test('Live asks for a Riot ID and sends a real API request',async({page})=>{
+  await page.route('**/api/live',async route=>{expect(route.request().postDataJSON()).toMatchObject({riotId:'Visible#EUW',platform:'EUW1'});await route.fulfill({json:{status:'not_in_game',message:'Aucune partie commencée visible. La sélection des champions est inaccessible.'}});});
+  await page.locator('#begin-live').click();await expect(page.locator('#identity-dialog')).toBeVisible();
+  await page.getByLabel('Riot ID',{exact:true}).fill('Visible#EUW');await page.locator('#identity-submit').click();
+  await expect(page.locator('#identity-status')).toContainText('Aucune partie commencée');
+  await expect(page.locator('#draft-mode')).toHaveText('PARTIE EN DIRECT · RECHERCHE RIOT');
+});
+test('Personal statistics asks for Riot ID, region and role before enabling data',async({page})=>{
+  await page.locator('#begin-manual').click();await page.locator('#stat-mine').check();
+  await expect(page.locator('#identity-dialog')).toBeVisible();await expect(page.getByLabel('Riot ID',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('Région',{exact:true})).toBeVisible();await expect(page.getByLabel('Ton poste',{exact:true})).toBeVisible();
+  await page.locator('#close-identity').click();await expect(page.locator('#stat-mine')).not.toBeChecked();
+});
+test('Live imports only the returned champions after role confirmation',async({page})=>{
+  const teams=[{team:100,champions:['Garen','Viego','Yasuo','Caitlyn','Nautilus'].map(champion=>({champion}))},{team:200,champions:['Darius','Fiddlesticks','Ahri','Jinx','Lulu'].map(champion=>({champion}))}];
+  await page.route('**/api/live',route=>route.fulfill({json:{status:'in_game',account:{riotId:'Visible#EUW'},game:{gameId:'123',teams,trackedTeam:200,bans:[],source:'Riot Spectator-V5'}}}));
+  await page.locator('#begin-live').click();await page.locator('#setup-riot-id').fill('Visible#EUW');await page.locator('#identity-submit').click();
+  for(const team of [100,200])for(let i=0;i<5;i++)await page.locator(`[data-live-team="${team}"]`).nth(i).selectOption(String(i));
+  await page.getByRole('button',{name:'Importer les champions et analyser'}).click();
+  await expect(page.getByRole('combobox',{name:'Alliés TOP, champion'})).toHaveValue('Darius');
+  await expect(page.getByRole('combobox',{name:'Adversaires ADC, champion'})).toHaveValue('Caitlyn');
 });
 test('Filters, bans, optional AI and responsive layout',async({page})=>{
   await page.locator('#begin-manual').click();await page.locator('.filters summary').click();await page.locator('#filter-days').selectOption('7');

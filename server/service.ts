@@ -1,5 +1,6 @@
 import { db, cached, hash } from './db.ts';
-import { dataset } from './dataset.ts';
+import { dataset,personalDataset } from './dataset.ts';
+import { fullAggregates } from './aggregates.ts';
 import { Engine } from './engine.ts';
 import type { Champion, Draft } from './types.ts';
 import { HttpError } from './auth.ts';
@@ -16,8 +17,12 @@ export async function analyze(draft:Draft,user:string|null){
     const rows=await db()`select id,puuid from drafting.riot_accounts where user_id=${user}`;
     for(const p of draft.players){const a=rows.find(r=>r.id===p.accountId);if(!a)throw new HttpError(403,'Compte indisponible.');players[p.side][p.slot]=hash(a.puuid);}
   }
-  const engine=new Engine(await dataset(draft.filter),cat.champions);
+  const [common,personal,aggregated]=await Promise.all([dataset(draft.filter),personalDataset(draft.filter,[...Object.values(players.blue),...Object.values(players.red)]),fullAggregates(draft.filter)]);
+  const games=[...new Map([...common,...personal].map(g=>[g.id,g])).values()];
+  const engine=new Engine(games,cat.champions,aggregated.stats);
   const result=engine.analyze(draft,players) as ReturnType<Engine['analyze']> & {model?:unknown};
+  result.context.games=aggregated.games;
+  Object.assign(result.context,{scope:'collected_sample',globalProvider:false,representative:false,interactionGames:games.length,recommendationMinimum:30});
   if(draft.filter.platform==='all'&&draft.filter.tier==='all'&&draft.filter.patch!=='all'&&draft.filter.days===30){
     const rows=await db()`select id,version,artifact,metrics from drafting.models where active=true and context->>'patch'=${draft.filter.patch} and (context->>'queue')::int=${draft.filter.queue} and created_at>now()-interval '8 days' order by created_at desc limit 1`;
     if(rows[0]){

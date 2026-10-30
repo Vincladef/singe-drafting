@@ -36,6 +36,7 @@ async function prepare(){
   const sql=neon(env('DATABASE_URL'));
   await sql.transaction(statements(await readFile('migrations/001_initial.sql','utf8')).map(s=>sql.query(s)));
   await sql.transaction(statements(await readFile('migrations/002_timeline_sampling.sql','utf8')).map(s=>sql.query(s)));
+  await sql.transaction(statements(await readFile('migrations/003_collection.sql','utf8')).map(s=>sql.query(s)));
   await cache('catalog',{version,champions},7*86400,'Riot Data Dragon');
   console.log('Database migrations applied.');
   await sql.transaction(champions.map(c=>sql`insert into drafting.champions(id,riot_key,name,tags) values(${c.id},${Number(c.key)},${c.name},${JSON.stringify(c.tags||[])}::jsonb) on conflict(id) do update set name=excluded.name,tags=excluded.tags,updated_at=now()`));

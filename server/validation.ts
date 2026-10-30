@@ -10,4 +10,4 @@ export const draftSchema=z.object({blue:z.array(champion.nullable()).length(5),r
   for(const side of ['blue','red'] as const){if(new Set(d.selected[side]).size!==d.selected[side].length||d.selected[side].some(i=>d[side][i]))ctx.addIssue({code:'custom',message:'Seuls les postes libres sont sélectionnables.'});}
   if(d.players&&new Set(d.players.map(p=>`${p.side}:${p.slot}`)).size!==d.players.length)ctx.addIssue({code:'custom',message:'Un compte par poste.'});
 });
-export const preferencesSchema=z.object({metrics:z.array(z.enum(['wr','vs','gd15','gold15','kda','cs','xp15','xpd15','dpm','pick','ban','n','kp','vision','objectives'])).min(1).max(15),global:z.boolean(),personal:z.boolean(),filter:filterSchema}).partial();
+export const preferencesSchema=z.object({metrics:z.array(z.enum(['wr','vs','gd15','gold15','kda','cs','xp15','xpd15','dpm','pick','ban','n','kp','vision','objectives'])).min(1).max(15),global:z.boolean(),personal:z.boolean(),filter:filterSchema,primaryAccountId:z.uuid(),myRole:z.number().int().min(0).max(4)}).partial();

@@ -44,6 +44,12 @@ test('Personal stats are tied to exactly the supplied player hash',()=>{
   const e=new Engine([game(1,true),game(2,false)],catalog);
   assert.equal(e.personal('unknown','C0',0).champion.n,0);assert.equal(e.personal('player00','C0',0,'C5').matchup.n,2);assert.equal(e.personal('player00','C0',1).champion.n,0);
 });
+test('Champion statistics use the full aggregate even when the interaction cohort is small',()=>{
+  const g=game(1,true),stat=summarize([{p:g.participants[0],g}]);
+  const complete={...stat,n:120000,wins:60000,wr:50};
+  const engine=new Engine([g],catalog,{'TOP:C0':complete});
+  assert.equal(engine.stat('C0',0).n,120000);assert.equal(engine.stat('C0',0).wr,50);
+});
 test('Validation rejects duplicate champions, bans and occupied optimization slots',()=>{
   assert.ok(draftSchema.safeParse(draft).success);
   assert.equal(draftSchema.safeParse({...draft,bans:['C0']}).success,false);

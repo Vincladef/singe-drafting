@@ -15,7 +15,7 @@ export class Engine {
   playerRows=new Map<string,Row[]>();
   stats=new Map<string,Stat>();
   jointCounters=new Map<string,Count>();
-  constructor(public games:Game[],public catalog:Champion[]){
+  constructor(public games:Game[],public catalog:Champion[],public fullStats:Record<string,Stat>={}){
     for(const g of games){
       for(const p of g.participants){
         const row={p,g};this.rows.push(row);
@@ -37,6 +37,7 @@ export class Engine {
   }
   stat(champion:string,role?:number):Stat{
     const k=role===undefined?champion:`${ROLES[role]}:${champion}`;
+    if(this.fullStats[k])return this.fullStats[k];
     if(!this.stats.has(k))this.stats.set(k,summarize(this.single.get(k)||[],this.games.length,this.games.filter(g=>g.bans.includes(champion)).length));
     return this.stats.get(k)!;
   }
@@ -107,7 +108,7 @@ export class Engine {
     if(!slots.length)return [];
     let beam=[{team:draft[side].slice(),score:0,evidence:0}];
     for(const slot of slots){
-      const pool=this.catalog.filter(c=>this.stat(c.id,slot).n>=10).sort((a,b)=>{
+      const pool=this.catalog.filter(c=>this.stat(c.id,slot).n>=30).sort((a,b)=>{
         const aa=this.stat(a.id,slot),bb=this.stat(b.id,slot);
         return posterior(bb.wins,bb.n)-posterior(aa.wins,aa.n);
       }).slice(0,24);
