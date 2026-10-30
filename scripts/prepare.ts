@@ -20,6 +20,7 @@ async function download(url:string,path:string){
   await writeFile(path,new Uint8Array(await res.arrayBuffer()));
 }
 async function prepare(){
+  await writeFile('server/build-info.ts',`export const buildInfo=${JSON.stringify({commit:env('COMMIT_REF')||'development',builtAt:new Date().toISOString()})};\n`);
   await mkdir('public/assets/champions',{recursive:true});await mkdir('public/data',{recursive:true});
   // Original CC BY 2.0 photo, bundled in the deploy. The page never hotlinks it.
   await download('https://upload.wikimedia.org/wikipedia/commons/1/1d/Chimpanzee_Portrait.jpg','public/assets/monkey.jpg');
