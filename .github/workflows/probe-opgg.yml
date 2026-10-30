@@ -1,0 +1,24 @@
+name: Inspect official OP.GG MCP
+on:
+  push:
+    branches: [opgg-migration]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx tsx scripts/probe-opgg.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: opgg-contract
+          path: provider-probe/
+          retention-days: 3

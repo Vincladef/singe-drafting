@@ -11,3 +11,4 @@ public/assets/champions/
 public/assets/monkey.jpg
 public/assets/monkey.webp
 *.log
+provider-probe/
